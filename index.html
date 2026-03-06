@@ -117,6 +117,7 @@
       flex-direction:column;
       gap:16px;
       height:calc(100vh - 32px);
+      min-height:0;
       overflow-y:auto;
       overflow-x:hidden;
       padding-right:8px;
@@ -125,6 +126,8 @@
     .sidebar::-webkit-scrollbar{width:10px}
     .sidebar::-webkit-scrollbar-thumb{background:#c7d2e5;border-radius:999px}
     .sidebar::-webkit-scrollbar-track{background:transparent}
+    .sidebar .card{flex:0 0 auto}
+    .sidebar .card:last-child{min-height:0}
     .card{
       background:var(--card);
       border:1px solid var(--line);
@@ -304,7 +307,7 @@
   <aside class="sidebar">
     <section class="card">
       <div class="header"><h2>Import z QI</h2></div>
-      <div class="body stack">
+      <div class="body stack" style="min-height:0;">
         <div class="row wrap">
           <button id="importButton" class="primary-btn" type="button">Vybrat soubor pro import</button>
           <span id="importFileName" class="muted">Není vybraný žádný soubor</span>
@@ -316,7 +319,7 @@
 
     <section class="card">
       <div class="header"><h2>Fronta zakázek a operací</h2></div>
-      <div class="body stack">
+      <div class="body stack" style="min-height:0;">
         <input id="searchInput" placeholder="Hledat podle VZK nebo názvu dílce" />
         <select id="sortBy">
           <option value="default">Řazení: výchozí</option>
@@ -325,7 +328,7 @@
         </select>
         <select id="machineFilter"></select>
         <div class="muted">Konkrétní stroj se určí až přetažením do kalendáře. Ve frontě se ukazuje jen typ nebo možné zařazení.</div>
-        <div id="backlogList" class="list"></div>
+        <div id="backlogList" class="list" style="max-height:52vh; overflow-y:auto; overflow-x:hidden; padding-right:4px;"></div>
       </div>
     </section>
   </aside>
@@ -575,21 +578,59 @@ function getScheduleKey(dayKey, machineName){
   return `${dayKey}_${machineName}`;
 }
 function moveScheduledTask(taskFingerprint, fromDay, fromMachine, toDay, toMachine, targetIndex=null){
-  const fromKey = getScheduleKey(fromDay, fromMachine);
-  const toKey = getScheduleKey(toDay, toMachine);
-  const source = [...(state.schedule[fromKey] || [])];
-  const idx = source.findIndex(t => makeOperationFingerprint(t) === taskFingerprint);
-  if (idx === -1) return;
+  const allParts = Object.values(state.schedule).flat()
+    .filter(t => makeOperationFingerprint(t) === taskFingerprint)
+    .sort((a,b) => String(a.plannedDay || "").localeCompare(String(b.plannedDay || "")));
 
-  const task = { ...source[idx], machine: toMachine, plannedDay: toDay };
-  source.splice(idx, 1);
-  if (source.length) state.schedule[fromKey] = source;
-  else delete state.schedule[fromKey];
+  if(!allParts.length) return;
 
-  const dest = [...(state.schedule[toKey] || [])];
-  if (targetIndex === null || targetIndex < 0 || targetIndex > dest.length) dest.push(task);
-  else dest.splice(targetIndex, 0, task);
-  state.schedule[toKey] = dest;
+  // remove all existing parts of that operation from whole calendar
+  const newSchedule = {};
+  Object.entries(state.schedule).forEach(([key, tasks])=>{
+    const filtered = tasks.filter(t => makeOperationFingerprint(t) !== taskFingerprint);
+    if(filtered.length) newSchedule[key] = filtered;
+  });
+  state.schedule = newSchedule;
+
+  // if targetIndex is used and all parts fit into same lane/day as a single block, insert first part there and remaining continue after capacity
+  const prototype = {
+    ...allParts[0],
+    hours: Number(allParts[0].totalHours ?? allParts.reduce((s,t)=>s+Number(t.hours||0),0)),
+    totalHours: Number(allParts[0].totalHours ?? allParts.reduce((s,t)=>s+Number(t.hours||0),0)),
+  };
+
+  let remaining = Number(prototype.totalHours || prototype.hours || 0);
+  let day = parseDateKey(toDay);
+  let firstInserted = false
+  while(remaining > 0){
+    const key = `${toDateKey(day)}_${toMachine}`;
+    const tasks = [...(state.schedule[key] || [])];
+    const capacity = machineCapacity(toMachine);
+    const used = tasks.reduce((s,t)=>s + Number(t.hours || 0), 0);
+    const free = Math.max(capacity - used, 0);
+
+    if(free > 0){
+      const planned = Math.min(free, remaining);
+      const part = {
+        ...prototype,
+        id: crypto.randomUUID ? crypto.randomUUID() : (Date.now()+"-"+Math.random()),
+        machine: toMachine,
+        plannedDay: toDateKey(day),
+        hours: Number(planned.toFixed(2)),
+      };
+      if(!firstInserted && targetIndex !== null && toDateKey(day) === toDay){
+        const idx = Math.max(0, Math.min(targetIndex, tasks.length));
+        tasks.splice(idx, 0, part);
+        firstInserted = true;
+      } else {
+        tasks.push(part);
+      }
+      state.schedule[key] = tasks;
+      remaining = Number((remaining - planned).toFixed(2));
+    }
+
+    if(remaining > 0) day = nextWorkday(day);
+  }
 
   saveState();
   render();
