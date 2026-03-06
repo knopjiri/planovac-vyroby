@@ -1,0 +1,1064 @@
+<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>TIMSEAL – Plánovač výroby v5</title>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  <style>
+    :root{
+      --brand-orange:#d26e1e;
+      --brand-orange-dark:#b85f18;
+      --brand-blue:#1b254f;
+      --brand-blue-2:#243161;
+      --bg:#eef2f7;
+      --card:#ffffff;
+      --line:#d8e0eb;
+      --text:#172033;
+      --muted:#5f6f86;
+      --green:#e8f7ee;
+      --green-b:#92d4aa;
+      --red:#fdeaea;
+      --red-b:#efb1b1;
+      --blue:#e8eefb;
+      --amber:#fff1d6;
+      --amber-b:#efc36b;
+      --shadow:0 10px 30px rgba(27,37,79,.08);
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family:Inter,Segoe UI,Arial,sans-serif;
+      background:linear-gradient(180deg,#f4f7fb 0%, #eef2f7 100%);
+      color:var(--text)
+    }
+    .topbar{
+      position:sticky;
+      top:0;
+      z-index:1000;
+      background:linear-gradient(135deg,var(--brand-blue) 0%, var(--brand-blue-2) 100%);
+      color:#fff;
+      border-bottom:4px solid var(--brand-orange);
+      box-shadow:0 8px 24px rgba(27,37,79,.18);
+    }
+    .topbar-inner{
+      max-width:1600px;
+      margin:0 auto;
+      padding:18px 24px;
+      display:flex;
+      align-items:center;
+      gap:18px;
+      justify-content:space-between;
+    }
+    .brand{
+      display:flex;
+      align-items:center;
+      gap:16px;
+      min-width:0;
+    }
+    .brand-mark{
+      width:64px;
+      height:64px;
+      border-radius:14px;
+      background:linear-gradient(135deg,var(--brand-orange) 0%, #ec8b32 100%);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      color:#fff;
+      font-weight:800;
+      letter-spacing:.08em;
+      box-shadow:inset 0 1px 0 rgba(255,255,255,.25);
+      flex:0 0 auto;
+    }
+    .brand-text{min-width:0}
+    .brand-title{
+      font-size:30px;
+      line-height:1;
+      font-weight:900;
+      letter-spacing:.04em;
+      margin:0 0 6px;
+    }
+    .brand-subtitle{
+      display:inline-block;
+      padding:4px 10px;
+      background:#fff;
+      color:var(--brand-blue);
+      border-radius:999px;
+      font-size:12px;
+      font-weight:700;
+      letter-spacing:.08em;
+      text-transform:uppercase;
+    }
+    .topbar-note{
+      font-size:13px;
+      color:rgba(255,255,255,.82);
+      text-align:right;
+      max-width:420px;
+      line-height:1.4;
+    }
+    .app{
+      max-width:1600px;
+      margin:0 auto;
+      padding:24px;
+      display:grid;
+      grid-template-columns:390px 1fr;
+      gap:24px;
+      align-items:start
+    }
+    .content-sticky{
+      position:sticky;
+      top:112px;
+      z-index:900;
+    }
+    .sidebar{
+      position:sticky;
+      top:16px;
+      display:flex;
+      flex-direction:column;
+      gap:16px;
+      height:calc(100vh - 32px);
+      overflow-y:auto;
+      overflow-x:hidden;
+      padding-right:8px;
+      scrollbar-width:thin;
+    }
+    .sidebar::-webkit-scrollbar{width:10px}
+    .sidebar::-webkit-scrollbar-thumb{background:#c7d2e5;border-radius:999px}
+    .sidebar::-webkit-scrollbar-track{background:transparent}
+    .card{
+      background:var(--card);
+      border:1px solid var(--line);
+      border-radius:18px;
+      box-shadow:var(--shadow);
+      overflow:hidden;
+    }
+    .card h2{
+      margin:0;
+      font-size:18px;
+      font-weight:800;
+      color:var(--brand-blue);
+    }
+    .header{
+      padding:16px 18px 10px;
+      background:linear-gradient(180deg,#ffffff 0%, #f9fbfe 100%);
+      border-bottom:1px solid #edf1f7;
+    }
+    .body{padding:16px 18px 18px}
+    .stack{display:flex;flex-direction:column;gap:10px}
+    .row{display:flex;gap:8px;align-items:center}
+    .row.wrap{flex-wrap:wrap}
+    input, select, button{
+      font:inherit;
+      border:1px solid var(--line);
+      border-radius:12px;
+      padding:10px 12px;
+      background:#fff;
+      color:var(--text);
+      transition:.15s ease;
+    }
+    input:focus, select:focus{
+      outline:none;
+      border-color:#9cb0d4;
+      box-shadow:0 0 0 3px rgba(210,110,30,.12);
+    }
+    input[type=file]{padding:8px}
+    button{
+      cursor:pointer;
+      font-weight:700;
+    }
+    button:hover{
+      background:#f8fafc;
+      border-color:#c6d3e5;
+    }
+    .btn-sm{padding:6px 10px;font-size:12px}
+    .toolbar button,
+    .primary-btn{
+      background:var(--brand-orange);
+      color:#fff;
+      border-color:var(--brand-orange);
+    }
+    .toolbar button:hover,
+    .primary-btn:hover{
+      background:var(--brand-orange-dark);
+      border-color:var(--brand-orange-dark);
+    }
+    .toolbar .secondary{
+      background:#fff;
+      color:var(--brand-blue);
+      border-color:#c9d5e8;
+    }
+    .toolbar .secondary:hover{
+      background:#f7faff;
+      border-color:#aebfdd;
+    }
+    .muted{color:var(--muted);font-size:12px;line-height:1.45}
+    .list{display:flex;flex-direction:column;gap:10px}
+    .group,.op,.planned-op{
+      border:1px solid var(--line);
+      border-radius:14px;
+      padding:12px;
+      background:#fff
+    }
+    .group{
+      border-left:4px solid var(--brand-orange);
+      background:linear-gradient(180deg,#fff 0%, #fcfdff 100%);
+    }
+    .group-head,.op-head,.planned-head{
+      display:flex;justify-content:space-between;align-items:flex-start;gap:8px
+    }
+    .title{font-weight:700;font-size:14px}
+    .sub{font-size:12px;color:var(--muted);margin-top:4px;line-height:1.35}
+    .badge{
+      display:inline-block;
+      padding:3px 8px;
+      border-radius:999px;
+      border:1px solid #d8e0eb;
+      font-size:11px;
+      background:#f8fafc;
+      color:var(--brand-blue);
+      font-weight:700;
+    }
+    .badge.planned{
+      background:var(--green);
+      border-color:var(--green-b);
+      color:#17603a
+    }
+    .group-ops{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+    .op{background:#f9fbfe}
+    .op.planned{background:var(--green);border-color:var(--green-b);opacity:.82}
+    .main{display:flex;flex-direction:column;gap:16px}
+    .toolbar{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      background:#fff;
+      border:1px solid var(--line);
+      border-radius:18px;
+      padding:12px;
+      box-shadow:var(--shadow);
+    }
+    .machine-card .header{
+      padding-bottom:12px;
+      background:linear-gradient(135deg,var(--brand-blue) 0%, var(--brand-blue-2) 100%);
+    }
+    .machine-card .header h2{color:#fff}
+    .machine-grid{
+      display:grid;
+      grid-template-columns:repeat(5,minmax(180px,1fr));
+      gap:12px;
+      padding:16px;
+    }
+    .day{
+      border:1px solid var(--line);
+      border-radius:14px;
+      background:#f7f9fc;
+      padding:10px;
+      min-height:240px;
+      transition:.15s ease;
+    }
+    .day.drop-ok{
+      outline:2px solid #6ea0ff;
+      background:#eff5ff;
+      box-shadow:0 0 0 4px rgba(110,160,255,.12)
+    }
+    .day-head{display:flex;justify-content:space-between;align-items:flex-start;gap:6px}
+    .day-title{font-size:12px;font-weight:800;color:var(--brand-blue)}
+    .progress{
+      height:8px;background:#dbe4f0;border-radius:999px;overflow:hidden;margin:8px 0 6px
+    }
+    .bar{
+      height:100%;
+      background:linear-gradient(90deg,var(--brand-orange) 0%, #ec8b32 100%)
+    }
+    .planned-op{padding:8px;margin-top:8px}
+    .planned-op.green{background:var(--green);border-color:var(--green-b)}
+    .planned-op.red{background:var(--red);border-color:var(--red-b)}
+    .planned-op .actions{display:flex;gap:6px}
+    .tiny{font-size:11px;color:var(--muted)}
+    .warn{font-size:11px;color:#92400e;margin-top:4px;font-weight:700}
+    .hidden{display:none !important}
+    .empty{font-size:13px;color:var(--muted);padding:4px 0}
+    @media (max-width: 1200px){
+      .topbar-inner{align-items:flex-start;flex-direction:column}
+      .app{grid-template-columns:1fr}
+      .sidebar{position:static;max-height:none}
+    }
+    @media (max-width: 900px){
+      .machine-grid{grid-template-columns:1fr}
+      .brand-title{font-size:24px}
+      .brand-mark{width:52px;height:52px}
+    }
+  </style>
+</head>
+<body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <img src="timeseal_logo.png" alt="Timeseal logo" style="height:64px;max-width:min(680px,70vw);object-fit:contain;">
+    </div>
+    </div>
+    <div class="topbar-note">Interní plánovač výroby</div>
+  </div>
+</div>
+<div class="app">
+  <aside class="sidebar">
+    <section class="card">
+      <div class="header"><h2>Import z QI</h2></div>
+      <div class="body stack">
+        <div class="row wrap">
+          <button id="importButton" class="primary-btn" type="button">Vybrat soubor pro import</button>
+          <span id="importFileName" class="muted">Není vybraný žádný soubor</span>
+        </div>
+        <input id="fileInput" type="file" accept=".xlsx,.xls" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0;" />
+        <div class="muted">Nahraj export operací z QI. Použije se první list. Import kontroluje duplicity podle VZK, dílce, operace a času.</div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="header"><h2>Fronta zakázek a operací</h2></div>
+      <div class="body stack">
+        <input id="searchInput" placeholder="Hledat podle VZK nebo názvu dílce" />
+        <select id="sortBy">
+          <option value="default">Řazení: výchozí</option>
+          <option value="vzk-asc">Řazení: VZK vzestupně</option>
+          <option value="vzk-desc">Řazení: VZK sestupně</option>
+        </select>
+        <select id="machineFilter"></select>
+        <div class="muted">Konkrétní stroj se určí až přetažením do kalendáře. Ve frontě se ukazuje jen typ nebo možné zařazení.</div>
+        <div id="backlogList" class="list"></div>
+      </div>
+    </section>
+  </aside>
+
+  <main class="main">
+    <div class="toolbar content-sticky">
+      <button id="prevWeek">← Předchozí týden</button>
+      <button id="nextWeek">Další týden →</button>
+      <button id="todayWeek" class="secondary">Aktuální týden</button>
+      <button id="resetData" class="secondary">Reset uložených dat</button>
+    </div>
+    <div id="machinesWrap"></div>
+  </main>
+</div>
+
+<script>
+const WORKDAY_HOURS = 8;
+const BREAK_HOURS = 0.5;
+const AVAILABLE_HOURS = WORKDAY_HOURS - BREAK_HOURS;
+const STORAGE_KEY = "planovac-vyroby-html-v2";
+
+const MACHINES = [
+  { name: "NLX3000", shifts: 2 },
+  { name: "NLX2500", shifts: 2 },
+  { name: "NLX700", shifts: 1 },
+  { name: "ST35", shifts: 1 },
+  { name: "SN50", shifts: 2 },
+  { name: "VF3", shifts: 1 },
+  { name: "DMU75", shifts: 1 },
+];
+
+let state = {
+  weekStart: startOfWeek(new Date()),
+  backlog: [],
+  schedule: {},
+  expandedGroups: {},
+  searchTerm: "",
+  machineFilter: "vše",
+};
+
+function pad(n){ return String(n).padStart(2,"0"); }
+function toDateKey(d){ return d.getFullYear() + "-" + pad(d.getMonth()+1) + "-" + pad(d.getDate()); }
+function parseDateKey(s){ const [y,m,d]=s.split("-").map(Number); return new Date(y,m-1,d,12,0,0,0); }
+function startOfWeek(date){
+  const d = new Date(date);
+  const day = d.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate()+diff); d.setHours(0,0,0,0);
+  return d;
+}
+function addDays(date, days){ const d=new Date(date); d.setDate(d.getDate()+days); return d; }
+function isWeekend(date){ const x=date.getDay(); return x===0 || x===6; }
+function nextWorkday(date){ let d=addDays(date,1); while(isWeekend(d)) d=addDays(d,1); return d; }
+function formatDate(date){
+  return new Intl.DateTimeFormat("cs-CZ",{weekday:"short",day:"numeric",month:"numeric"}).format(date);
+}
+function getWeekLabel(dateStr){
+  const monday = startOfWeek(parseDateKey(dateStr));
+  const friday = addDays(monday,4);
+  const fmt = new Intl.DateTimeFormat("cs-CZ",{day:"numeric",month:"numeric"});
+  return `${fmt.format(monday)} - ${fmt.format(friday)}`;
+}
+function machineCapacity(machineName){
+  const m = MACHINES.find(x=>x.name===machineName); return (m?.shifts || 1) * AVAILABLE_HOURS;
+}
+function detectMachineOptionsFromOperation(op){
+  const text = String(op || "").toUpperCase().trim();
+
+  if (/\bSN\s*50\b/.test(text) || text === "SN50") return ["SN50"];
+  if (text.includes("SCNC") || text.includes("SOUSTRU")) return ["NLX3000","NLX2500","NLX700","ST35"];
+  if (text.includes("FREZ") || text.includes("FCNC")) return ["VF3","DMU75"];
+
+  return [];
+}
+function machineTypeLabel(machineOptions){
+  if (!machineOptions || machineOptions.length===0) return "Bez stroje";
+  if (machineOptions.length===1) return machineOptions[0];
+  const turning = ["NLX3000","NLX2500","NLX700","ST35","SN50"];
+  const milling = ["VF3","DMU75"];
+  const isTurning = machineOptions.every(m=>turning.includes(m));
+  const isMilling = machineOptions.every(m=>milling.includes(m));
+  if (isTurning) return "Soustruh";
+  if (isMilling) return "Fréza";
+  return machineOptions.join(", ");
+}
+function extractPartName(task){
+  if (task.partName && String(task.partName).trim()) return String(task.partName).trim();
+  const group = String(task.groupName || "").trim();
+  if (group.includes("|")) {
+    const parts = group.split("|").map(x => x.trim()).filter(Boolean);
+    if (parts.length >= 2) return parts.slice(1).join(" | ");
+  }
+  return "";
+}
+function normalizeGroupName(task){
+  return `VZK ${task.vzk || ""}`.trim();
+}
+function makeOperationFingerprint(task){
+  return [
+    String(task.vzk || "").trim(),
+    extractPartName(task),
+    String(task.name || "").trim(),
+    Number(task.totalHours ?? task.hours ?? 0)
+  ].join("|");
+}
+function groupImportedTasks(tasks){
+  const groups = {};
+  tasks.forEach(task=>{
+    const key = String(task.vzk || `no-vzk-${task.id}`);
+    if(!groups[key]){
+      groups[key] = {
+        id:`group-${key}`, type:"group", vzk:String(task.vzk || ""), name:normalizeGroupName(task),
+        priority:"Střední", due:"", operations:[]
+      };
+    }
+    groups[key].operations.push({...task, groupName: normalizeGroupName(task)});
+  });
+  return Object.values(groups);
+}
+function getDueStatus(due, plannedDate){
+  if(!due) return "none";
+  const dueDate = new Date(due + "T23:59:59");
+  const current = parseDateKey(plannedDate);
+  current.setHours(12,0,0,0);
+  return current <= dueDate ? "before" : "after";
+}
+function saveState(){
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({
+    weekStart: toDateKey(state.weekStart),
+    backlog: state.backlog,
+    schedule: state.schedule,
+    expandedGroups: state.expandedGroups,
+    machineFilter: state.machineFilter,
+    searchTerm: state.searchTerm,
+    sortBy: state.sortBy,
+    sortBy: state.sortBy,
+  }));
+}
+function loadState(){
+  try{
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if(!raw) return;
+    const parsed = JSON.parse(raw);
+    if(parsed.weekStart) state.weekStart = startOfWeek(parseDateKey(parsed.weekStart));
+    if(Array.isArray(parsed.backlog)) state.backlog = parsed.backlog;
+    if(parsed.schedule && typeof parsed.schedule === "object") state.schedule = parsed.schedule;
+    if(parsed.expandedGroups && typeof parsed.expandedGroups === "object") state.expandedGroups = parsed.expandedGroups;
+    if(typeof parsed.machineFilter === "string") state.machineFilter = parsed.machineFilter;
+    if(typeof parsed.searchTerm === "string") state.searchTerm = parsed.searchTerm;
+    if(typeof parsed.sortBy === "string") state.sortBy = parsed.sortBy;
+    if(typeof parsed.sortBy === "string") state.sortBy = parsed.sortBy;
+
+    state.backlog = state.backlog.map(item=>{
+      if(item.type !== "group") return item;
+      const normalizedOps = (item.operations || []).map(op=>({
+        ...op,
+        partName: extractPartName(op),
+        groupName: normalizeGroupName(op)
+      }));
+      const seen = new Set();
+      const uniqueOps = normalizedOps.filter(op=>{
+        const fp = makeOperationFingerprint(op);
+        if(seen.has(fp)) return false
+        seen.add(fp);
+        return true;
+      });
+      return {
+        ...item,
+        id: `group-${item.vzk}`,
+        vzk: String(item.vzk || ""),
+        name: normalizeGroupName(item),
+        operations: uniqueOps
+      };
+    });
+
+    const normalizedSchedule = {};
+    Object.entries(state.schedule).forEach(([key, tasks])=>{
+      const seen = new Set();
+      const uniqueTasks = (tasks || []).map(task=>({
+        ...task,
+        partName: extractPartName(task),
+        groupName: normalizeGroupName(task)
+      })).filter(task=>{
+        const fp = `${key}::${makeOperationFingerprint(task)}::${task.plannedDay || ""}::${task.machine || ""}::${task.hours || ""}`;
+        if(seen.has(fp)) return false;
+        seen.add(fp);
+        return true;
+      });
+      if(uniqueTasks.length) normalizedSchedule[key] = uniqueTasks;
+    });
+    state.schedule = normalizedSchedule;
+  }catch(e){ console.error(e); }
+}
+function resetAllData(){
+  state.weekStart = startOfWeek(new Date());
+  state.backlog = [];
+  state.schedule = {};
+  state.expandedGroups = {};
+  state.searchTerm = "";
+  state.machineFilter = "vše";
+  localStorage.removeItem(STORAGE_KEY);
+  render();
+}
+function getWeekDays(){
+  return Array.from({length:5}, (_,i)=>addDays(state.weekStart,i));
+}
+function getScheduledOperationFingerprints(){
+  const set = new Set();
+  Object.values(state.schedule).flat().forEach(task=>set.add(makeOperationFingerprint(task)));
+  return set;
+}
+function getFilteredBacklog(){
+  const q = state.searchTerm.trim().toLowerCase();
+  const result = state.backlog.map(item=>{
+    if(item.type !== "group"){
+      const text = `${item.name} ${item.vzk||""}`.toLowerCase();
+      const machineMatch = state.machineFilter === "vše" || (item.machineOptions||[]).includes(state.machineFilter) || item.machine === state.machineFilter;
+      if(!machineMatch) return null;
+      return (!q || text.includes(q)) ? item : null;
+    }
+    const groupText = `${item.name} ${item.vzk||""}`.toLowerCase();
+    const filteredOps = item.operations.filter(op=>{
+      const opText = `${op.name} ${op.vzk||""} ${item.name}`.toLowerCase();
+      const machineMatch = state.machineFilter === "vše" || (op.machineOptions||[]).includes(state.machineFilter) || op.machine === state.machineFilter;
+      const searchMatch = !q || opText.includes(q) || groupText.includes(q);
+      return machineMatch && searchMatch;
+    });
+    if(filteredOps.length===0) return null;
+    if(!q || groupText.includes(q)) return {...item, operations: filteredOps};
+    return {...item, operations: filteredOps};
+  }).filter(Boolean);
+
+  if(state.sortBy === "vzk-asc"){
+    result.sort((a,b)=>String(a.vzk || "").localeCompare(String(b.vzk || ""), undefined, {numeric:true}));
+  } else if(state.sortBy === "vzk-desc"){
+    result.sort((a,b)=>String(b.vzk || "").localeCompare(String(a.vzk || ""), undefined, {numeric:true}));
+  }
+
+  return result;
+}
+function usedHours(dayKey, machineName){
+  const key = `${dayKey}_${machineName}`;
+  return (state.schedule[key] || []).reduce((s,t)=>s+Number(t.hours||0),0);
+}
+
+function getScheduleKey(dayKey, machineName){
+  return `${dayKey}_${machineName}`;
+}
+function moveScheduledTask(taskFingerprint, fromDay, fromMachine, toDay, toMachine, targetIndex=null){
+  const fromKey = getScheduleKey(fromDay, fromMachine);
+  const toKey = getScheduleKey(toDay, toMachine);
+  const source = [...(state.schedule[fromKey] || [])];
+  const idx = source.findIndex(t => makeOperationFingerprint(t) === taskFingerprint);
+  if (idx === -1) return;
+
+  const task = { ...source[idx], machine: toMachine, plannedDay: toDay };
+  source.splice(idx, 1);
+  if (source.length) state.schedule[fromKey] = source;
+  else delete state.schedule[fromKey];
+
+  const dest = [...(state.schedule[toKey] || [])];
+  if (targetIndex === null || targetIndex < 0 || targetIndex > dest.length) dest.push(task);
+  else dest.splice(targetIndex, 0, task);
+  state.schedule[toKey] = dest;
+
+  saveState();
+  render();
+}
+function reorderScheduledTask(dayKey, machineName, taskFingerprint, targetIndex){
+  const key = getScheduleKey(dayKey, machineName);
+  const arr = [...(state.schedule[key] || [])];
+  const idx = arr.findIndex(t => makeOperationFingerprint(t) === taskFingerprint);
+  if (idx === -1) return;
+  const [task] = arr.splice(idx, 1);
+  if (targetIndex < 0) targetIndex = 0;
+  if (targetIndex > arr.length) targetIndex = arr.length;
+  arr.splice(targetIndex, 0, task);
+  state.schedule[key] = arr;
+  saveState();
+  render();
+}
+function readDraggedScheduledTask(e){
+  try{
+    const raw = e.dataTransfer.getData("application/scheduled-task");
+    if(!raw) return null;
+    return JSON.parse(raw);
+  }catch(_){ return null; }
+}
+function taskOverflowLabel(task){
+  const fp = makeOperationFingerprint(task);
+  const parts = Object.values(state.schedule).flat()
+    .filter(t=>makeOperationFingerprint(t)===fp)
+    .sort((a,b)=>String(a.plannedDay).localeCompare(String(b.plannedDay)));
+  if(parts.length <= 1) return null;
+  const firstWeek = getWeekLabel(parts[0].plannedDay);
+  const lastWeek = getWeekLabel(parts[parts.length-1].plannedDay);
+  return firstWeek === lastWeek ? null : `Přetéká do týdne ${lastWeek}`;
+}
+function mergeImportedGroups(groupedImported){
+  const merged = [...state.backlog];
+  groupedImported.forEach(incomingGroup=>{
+    const idx = merged.findIndex(item=>item.type==="group" && String(item.vzk)===String(incomingGroup.vzk));
+    if(idx === -1){
+      merged.unshift({...incomingGroup, name: normalizeGroupName(incomingGroup)});
+      return;
+    }
+    const existingOps = merged[idx].operations || [];
+    const fpSet = new Set(existingOps.map(makeOperationFingerprint));
+    const uniqueIncoming = incomingGroup.operations.filter(op=>!fpSet.has(makeOperationFingerprint(op)));
+    merged[idx] = {
+      ...merged[idx],
+      name: normalizeGroupName(incomingGroup),
+      operations:[...uniqueIncoming, ...existingOps]
+    };
+  });
+  state.backlog = merged;
+}
+function handleImport(file){
+  if(!file) return;
+  if(typeof XLSX === "undefined"){
+    alert("XLSX knihovna se nenačetla. Bez internetu nebo CDN import .xlsx nepoběží.");
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = e=>{
+    const data = new Uint8Array(e.target.result);
+    const workbook = XLSX.read(data,{type:"array"});
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet);
+    const importedTasks = [];
+    rows.forEach(row=>{
+      const vzk = row["Evidenční číslo zakázky"];
+      const operation = row["Název operace"] || row["Druh operace"];
+      const time = Number(row["Čas celkem"]);
+      const part = row["Název sestavy"] || row["Položka"] || row["Název dílce"] || row["Dílec"] || row["Sestava"] || "";
+      if(!vzk || !operation || !time) return;
+      const machineOptions = detectMachineOptionsFromOperation(operation);
+      if(machineOptions.length === 0) return;
+      importedTasks.push({
+        id: crypto.randomUUID ? crypto.randomUUID() : (Date.now()+"-"+Math.random()),
+        type:"operation",
+        vzk:String(vzk),
+        partName:String(part || ""),
+        groupName:`VZK ${vzk}`,
+        name:String(operation),
+        hours:Number(time),
+        totalHours:Number(time),
+        priority:"Střední",
+        due:"",
+        machineOptions
+      });
+    });
+
+    const existingFingerprints = new Set();
+    state.backlog.forEach(item=>{
+      if(item.type==="group") item.operations.forEach(op=>existingFingerprints.add(makeOperationFingerprint(op)));
+      else existingFingerprints.add(makeOperationFingerprint(item));
+    });
+    Object.values(state.schedule).flat().forEach(op=>existingFingerprints.add(makeOperationFingerprint(op)));
+
+    const uniqueImported = importedTasks.filter(task=>!existingFingerprints.has(makeOperationFingerprint(task)));
+    const groupedImported = groupImportedTasks(uniqueImported);
+    mergeImportedGroups(groupedImported);
+    saveState();
+    render();
+  };
+  reader.readAsArrayBuffer(file);
+}
+function toggleGroup(groupId){
+  state.expandedGroups[groupId] = !state.expandedGroups[groupId];
+  saveState(); render();
+}
+function deleteOperationFromGroup(groupId, operationId){
+  state.backlog = state.backlog.map(item=>{
+    if(item.type!=="group" || item.id!==groupId) return item;
+    return {...item, operations:item.operations.filter(op=>op.id!==operationId)};
+  }).filter(item=>item.type!=="group" || item.operations.length>0);
+  saveState(); render();
+}
+function deleteBacklogGroup(groupId){
+  state.backlog = state.backlog.filter(item=>item.id!==groupId);
+  saveState(); render();
+}
+function planTask(task, startDayKey, targetMachine){
+  if(task.machineOptions?.length && !task.machineOptions.includes(targetMachine)) return;
+  let remaining = Number(task.totalHours ?? task.hours ?? 0);
+  let day = parseDateKey(startDayKey);
+  const selectedMachine = targetMachine;
+  while(remaining > 0){
+    const key = `${toDateKey(day)}_${selectedMachine}`;
+    const tasks = state.schedule[key] || [];
+    const capacity = machineCapacity(selectedMachine);
+    const used = tasks.reduce((s,t)=>s+Number(t.hours||0),0);
+    const free = Math.max(capacity - used, 0);
+    if(free > 0){
+      const planned = Math.min(free, remaining);
+      tasks.push({
+        ...task,
+        id: crypto.randomUUID ? crypto.randomUUID() : (Date.now()+"-"+Math.random()),
+        machine:selectedMachine,
+        hours:Number(planned.toFixed(2)),
+        totalHours:Number(task.totalHours ?? task.hours ?? 0),
+        plannedDay:toDateKey(day),
+      });
+      state.schedule[key] = tasks;
+      remaining = Number((remaining - planned).toFixed(2));
+    }
+    if(remaining > 0) day = nextWorkday(day);
+  }
+
+  state.backlog = state.backlog.map(item=>{
+    if(item.type!=="group" || item.id!==task.groupId) return item;
+    return {...item, operations:item.operations.filter(op=>op.id!==task.id)};
+  }).filter(item=>item.type!=="group" || item.operations.length>0);
+  saveState(); render();
+}
+function returnScheduledTaskToBacklog(taskToReturn){
+  const fp = makeOperationFingerprint(taskToReturn);
+  const totalHours = Number(taskToReturn.totalHours ?? taskToReturn.hours ?? 0);
+
+  const newSchedule = {};
+  Object.entries(state.schedule).forEach(([key, tasks])=>{
+    const filtered = tasks.filter(task=>makeOperationFingerprint(task)!==fp);
+    if(filtered.length) newSchedule[key] = filtered;
+  });
+  state.schedule = newSchedule;
+
+  const groupId = `group-${taskToReturn.vzk}`;
+  const restoredOperation = {
+    id: crypto.randomUUID ? crypto.randomUUID() : (Date.now()+"-"+Math.random()),
+    type:"operation",
+    vzk:taskToReturn.vzk,
+    partName:extractPartName(taskToReturn),
+    groupName:normalizeGroupName(taskToReturn),
+    name:taskToReturn.name,
+    hours:totalHours,
+    totalHours:totalHours,
+    priority:taskToReturn.priority || "Střední",
+    due:taskToReturn.due || "",
+    machineOptions:taskToReturn.machineOptions || [],
+  };
+  const idx = state.backlog.findIndex(item=>item.type==="group" && String(item.vzk)===String(taskToReturn.vzk));
+  if(idx === -1){
+    state.backlog.unshift({
+      id:groupId, type:"group", vzk:String(taskToReturn.vzk), name:normalizeGroupName(taskToReturn),
+      priority:"Střední", due:"", operations:[restoredOperation]
+    });
+  }else{
+    const alreadyExists = state.backlog[idx].operations.some(op=>makeOperationFingerprint(op)===fp);
+    if(!alreadyExists) state.backlog[idx].operations.unshift(restoredOperation);
+  }
+  state.expandedGroups[groupId] = true;
+  saveState(); render();
+}
+function renderMachineFilter(){
+  const select = document.getElementById("machineFilter");
+  select.innerHTML = `<option value="vše">Všechny stroje</option>` + MACHINES.map(m=>`<option value="${m.name}">${m.name}</option>`).join("");
+  select.value = state.machineFilter;
+}
+function renderBacklog(){
+  const wrap = document.getElementById("backlogList");
+  const filtered = getFilteredBacklog();
+  const plannedSet = getScheduledOperationFingerprints();
+  if(filtered.length===0){
+    wrap.innerHTML = `<div class="empty">Nic neodpovídá filtru. Překvapivě i strojní výroba má své tiché momenty.</div>`;
+    return;
+  }
+  wrap.innerHTML = "";
+  filtered.forEach(task=>{
+    if(task.type==="group"){
+      const totalHours = task.operations.reduce((s,op)=>s + Number(op.totalHours ?? op.hours ?? 0),0);
+      const isExpanded = !!state.expandedGroups[task.id];
+      const group = document.createElement("div");
+      group.className = "group";
+      group.innerHTML = `
+        <div class="group-head">
+          <div>
+            <div class="title">${escapeHtml(task.name)}</div>
+            <div class="sub">${task.operations.length} operací • ${totalHours.toFixed(2)} h celkem</div>
+          </div>
+          <div class="row">
+            <button class="btn-sm toggle-btn secondary">${isExpanded ? "Skrýt" : "Rozbalit"}</button>
+            <button class="btn-sm del-group secondary">Smazat</button>
+          </div>
+        </div>
+        <div class="group-ops ${isExpanded ? "" : "hidden"}"></div>
+      `;
+      group.querySelector(".toggle-btn").onclick = ()=>toggleGroup(task.id);
+      group.querySelector(".del-group").onclick = ()=>deleteBacklogGroup(task.id);
+      const opsWrap = group.querySelector(".group-ops");
+      task.operations.forEach(op=>{
+        const isPlanned = plannedSet.has(makeOperationFingerprint(op));
+        const div = document.createElement("div");
+        div.className = `op ${isPlanned ? "planned" : ""}`;
+        div.draggable = !isPlanned;
+        div.innerHTML = `
+          <div class="op-head">
+            <div>
+              <div class="row wrap">
+                <div class="title">${escapeHtml(op.name)}</div>
+                ${isPlanned ? `<span class="badge planned">Naplánováno</span>` : ``}
+              </div>
+              <div class="sub"><strong>Dílec:</strong> ${escapeHtml(op.partName || "Bez názvu dílce")}</div>
+              <div class="sub"><strong>Operace:</strong> ${escapeHtml(op.name || "")}</div>
+              <div class="sub">${Number(op.totalHours ?? op.hours ?? 0)} h • ${escapeHtml(machineTypeLabel(op.machineOptions))}</div>
+            </div>
+            ${isPlanned ? `` : `<button class="btn-sm del-op secondary">Smazat</button>`}
+          </div>
+        `;
+        if(!isPlanned){
+          div.addEventListener("dragstart", e=>{
+            e.dataTransfer.setData("application/json", JSON.stringify({...op, groupId:task.id}));
+          });
+          div.querySelector(".del-op").onclick = ()=>deleteOperationFromGroup(task.id, op.id);
+        }
+        opsWrap.appendChild(div);
+      });
+      wrap.appendChild(group);
+    }
+  });
+}
+function renderMachines(){
+  const wrap = document.getElementById("machinesWrap");
+  const weekDays = getWeekDays();
+  wrap.innerHTML = MACHINES.map(machine=>{
+    const daysHtml = weekDays.map(day=>{
+      const dayKey = toDateKey(day);
+      const key = `${dayKey}_${machine.name}`;
+      const tasks = state.schedule[key] || [];
+      const used = tasks.reduce((s,t)=>s+Number(t.hours||0),0);
+      const capacity = machineCapacity(machine.name);
+      const util = Math.min(100, capacity ? used / capacity * 100 : 0);
+      const items = tasks.map((t, index)=>{
+        const dueStatus = getDueStatus(t.due, dayKey);
+        const cls = dueStatus === "before" ? "green" : dueStatus === "after" ? "red" : "";
+        const overflow = taskOverflowLabel(t);
+        return `
+          <div class="planned-op ${cls}" draggable="true"
+               data-fp="${escapeAttr(makeOperationFingerprint(t))}"
+               data-day="${escapeAttr(dayKey)}"
+               data-machine="${escapeAttr(machine.name)}"
+               data-index="${index}">
+            <div class="planned-head">
+              <div>
+                <div class="title">${escapeHtml(t.name)} (${Number(t.hours).toFixed(2)} h)</div>
+                <div class="tiny">VZK ${escapeHtml(t.vzk || "")}${t.partName ? " | " + escapeHtml(t.partName) : ""}</div>
+                ${t.due ? `<div class="tiny">Termín: ${escapeHtml(t.due)}</div>` : ``}
+                ${overflow ? `<div class="warn">${escapeHtml(overflow)}</div>` : ``}
+              </div>
+              <div class="actions">
+                <button class="btn-sm return-btn secondary" data-fp="${escapeAttr(makeOperationFingerprint(t))}">↩</button>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join("");
+
+      return `
+        <div class="day" data-day="${dayKey}" data-machine="${machine.name}">
+          <div class="day-head">
+            <div class="day-title">${escapeHtml(formatDate(day))}</div>
+            <span class="badge">${used.toFixed(1)} / ${capacity} h</span>
+          </div>
+          <div class="progress"><div class="bar" style="width:${util}%"></div></div>
+          <div class="tiny">Kapacita dle směn: ${capacity} h</div>
+          <div class="day-items">${items || `<div class="empty">Přetáhni sem operaci.</div>`}</div>
+        </div>
+      `;
+    }).join("");
+
+    return `
+      <section class="card machine-card">
+        <div class="header">
+          <h2>${machine.name} • ${machine.shifts} ${machine.shifts===1 ? "směna" : "směny"} • kapacita ${machineCapacity(machine.name)} h/den</h2>
+        </div>
+        <div class="machine-grid">${daysHtml}</div>
+      </section>
+    `;
+  }).join("");
+
+  wrap.querySelectorAll(".day").forEach(el=>{
+    el.addEventListener("dragover", e=>{
+      e.preventDefault();
+      const backlogTask = readDraggedTask(e);
+      const scheduledTask = readDraggedScheduledTask(e);
+      const machine = el.dataset.machine;
+
+      if(backlogTask){
+        if(backlogTask.machineOptions?.length && !backlogTask.machineOptions.includes(machine)) return;
+        el.classList.add("drop-ok");
+      } else if(scheduledTask){
+        if(scheduledTask.machineOptions?.length && !scheduledTask.machineOptions.includes(machine)) return;
+        el.classList.add("drop-ok");
+      }
+    });
+    el.addEventListener("dragleave", ()=>el.classList.remove("drop-ok"));
+    el.addEventListener("drop", e=>{
+      e.preventDefault();
+      el.classList.remove("drop-ok");
+      const machine = el.dataset.machine;
+      const backlogTask = readDraggedTask(e);
+      const scheduledTask = readDraggedScheduledTask(e);
+
+      if(backlogTask){
+        if(backlogTask.machineOptions?.length && !backlogTask.machineOptions.includes(machine)) return;
+        planTask(backlogTask, el.dataset.day, machine);
+        return;
+      }
+
+      if(scheduledTask){
+        if(scheduledTask.machineOptions?.length && !scheduledTask.machineOptions.includes(machine)) return;
+        moveScheduledTask(
+          scheduledTask.fp,
+          scheduledTask.fromDay,
+          scheduledTask.fromMachine,
+          el.dataset.day,
+          machine,
+          null
+        );
+      }
+    });
+  });
+
+  wrap.querySelectorAll(".planned-op").forEach(el=>{
+    el.addEventListener("dragstart", e=>{
+      const task = Object.values(state.schedule).flat().find(t =>
+        makeOperationFingerprint(t) === el.dataset.fp &&
+        String(t.plannedDay) === String(el.dataset.day) &&
+        String(t.machine) === String(el.dataset.machine)
+      );
+      const payload = {
+        fp: el.dataset.fp,
+        fromDay: el.dataset.day,
+        fromMachine: el.dataset.machine,
+        index: Number(el.dataset.index || 0),
+        machineOptions: task?.machineOptions || []
+      };
+      e.dataTransfer.setData("application/scheduled-task", JSON.stringify(payload));
+    });
+
+    el.addEventListener("dragover", e=>{
+      e.preventDefault();
+      e.stopPropagation();
+      const scheduledTask = readDraggedScheduledTask(e);
+      if(!scheduledTask) return;
+      const targetMachine = el.dataset.machine;
+      if(scheduledTask.machineOptions?.length && !scheduledTask.machineOptions.includes(targetMachine)) return;
+      el.classList.add("drop-ok");
+    });
+
+    el.addEventListener("dragleave", ()=>el.classList.remove("drop-ok"));
+
+    el.addEventListener("drop", e=>{
+      e.preventDefault();
+      e.stopPropagation();
+      el.classList.remove("drop-ok");
+      const scheduledTask = readDraggedScheduledTask(e);
+      if(!scheduledTask) return;
+
+      const targetDay = el.dataset.day;
+      const targetMachine = el.dataset.machine;
+      const targetIndex = Number(el.dataset.index || 0);
+
+      if(scheduledTask.machineOptions?.length && !scheduledTask.machineOptions.includes(targetMachine)) return;
+
+      const sameLane = scheduledTask.fromDay === targetDay && scheduledTask.fromMachine === targetMachine;
+      if(sameLane){
+        reorderScheduledTask(targetDay, targetMachine, scheduledTask.fp, targetIndex);
+      } else {
+        moveScheduledTask(
+          scheduledTask.fp,
+          scheduledTask.fromDay,
+          scheduledTask.fromMachine,
+          targetDay,
+          targetMachine,
+          targetIndex
+        );
+      }
+    });
+  });
+
+  wrap.querySelectorAll(".return-btn").forEach(btn=>{
+    btn.onclick = ()=>{
+      const fp = btn.dataset.fp;
+      const task = Object.values(state.schedule).flat().find(t=>makeOperationFingerprint(t)===fp);
+      if(task) returnScheduledTaskToBacklog(task);
+    };
+  });
+}
+function readDraggedTask(e){
+  try{
+    const raw = e.dataTransfer.getData("application/json");
+    if(!raw) return null;
+    return JSON.parse(raw);
+  }catch(_){ return null; }
+}
+function escapeHtml(s){
+  return String(s ?? "").replace(/[&<>"']/g, c=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+}
+function escapeAttr(s){ return escapeHtml(s); }
+function render(){
+  document.getElementById("searchInput").value = state.searchTerm;
+  document.getElementById("sortBy").value = state.sortBy;
+  renderMachineFilter();
+  renderBacklog();
+  renderMachines();
+  saveState();
+}
+
+const importBtn = document.getElementById("importButton");
+const fileInputEl = document.getElementById("fileInput");
+const importFileNameEl = document.getElementById("importFileName");
+if(importBtn && fileInputEl){
+  importBtn.addEventListener("click", ()=>fileInputEl.click());
+  fileInputEl.addEventListener("change", e=>{
+    const file = e.target.files[0];
+    if(importFileNameEl) importFileNameEl.textContent = file ? file.name : "Není vybraný žádný soubor";
+    handleImport(file);
+  });
+}
+document.getElementById("searchInput").addEventListener("input", e=>{ state.searchTerm = e.target.value; render(); });
+document.getElementById("machineFilter").addEventListener("change", e=>{ state.machineFilter = e.target.value; render(); });
+if(document.getElementById("sortBy")){
+  document.getElementById("sortBy").addEventListener("change", e=>{ state.sortBy = e.target.value; render(); });
+}
+document.getElementById("sortBy").addEventListener("change", e=>{ state.sortBy = e.target.value; render(); });
+document.getElementById("prevWeek").onclick = ()=>{ state.weekStart = addDays(state.weekStart,-7); render(); };
+document.getElementById("nextWeek").onclick = ()=>{ state.weekStart = addDays(state.weekStart,7); render(); };
+document.getElementById("todayWeek").onclick = ()=>{ state.weekStart = startOfWeek(new Date()); render(); };
+document.getElementById("resetData").onclick = ()=>{ if(confirm("Opravdu smazat uložená data?")) resetAllData(); };
+
+loadState();
+render();
+</script>
+</body>
+</html>
