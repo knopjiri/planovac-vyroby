@@ -601,12 +601,7 @@ function moveScheduledTask(taskFingerprint, fromDay, fromMachine, toDay, toMachi
     operationKey: opKey,
   };
 
-  const cleanedSchedule = {};
-  Object.entries(state.schedule).forEach(([key, tasks])=>{
-    const filtered = tasks.filter(t => makeOperationFingerprint(t) !== opKey);
-    if(filtered.length) cleanedSchedule[key] = filtered;
-  });
-  state.schedule = cleanedSchedule;
+  removeOperationFromSchedule(opKey);
 
   let remaining = Number(prototype.totalHours || 0);
   let day = parseDateKey(toDay);
@@ -644,6 +639,11 @@ function moveScheduledTask(taskFingerprint, fromDay, fromMachine, toDay, toMachi
     }
 
     if(remaining > 0) day = nextWorkday(day);
+  }
+
+  compactMachineFromDay(toMachine, toDay);
+  if (fromMachine !== toMachine || fromDay !== toDay) {
+    compactMachineFromDay(fromMachine, fromDay);
   }
 
   clearDragPreview();
@@ -731,6 +731,69 @@ function buildBacklogPlacementPreview(task, toDay, toMachine){
   }
   return placements;
 }
+function getOperationMetaByKey(operationKey){
+  const parts = getOperationPartsByKey(operationKey);
+  return parts.length ? { ...parts[0] } : null;
+}
+function removeOperationFromSchedule(operationKey){
+  const next = {};
+  Object.entries(state.schedule).forEach(([key, tasks]) => {
+    const filtered = tasks.filter(t => makeOperationFingerprint(t) !== String(operationKey || ""));
+    if (filtered.length) next[key] = filtered;
+  });
+  state.schedule = next;
+}
+function compactOperationForward(operationKey){
+  const parts = getOperationPartsByKey(operationKey);
+  if (!parts.length) return;
+
+  const meta = { ...parts[0] };
+  const totalHours = Number(meta.totalHours ?? parts.reduce((s,t)=>s + Number(t.hours || 0), 0));
+  const machine = meta.machine;
+  const firstDay = parts
+    .map(p => String(p.plannedDay || ""))
+    .sort()[0];
+
+  removeOperationFromSchedule(operationKey);
+
+  let remaining = totalHours;
+  let day = parseDateKey(firstDay);
+
+  while (remaining > 0) {
+    const key = `${toDateKey(day)}_${machine}`;
+    const tasks = [...(state.schedule[key] || [])];
+    const capacity = machineCapacity(machine);
+    const used = tasks.reduce((s,t)=>s + Number(t.hours || 0), 0);
+    const free = Math.max(capacity - used, 0);
+
+    if (free > 0) {
+      const planned = Math.min(free, remaining);
+      tasks.push({
+        ...meta,
+        id: crypto.randomUUID ? crypto.randomUUID() : (Date.now()+"-"+Math.random()),
+        hours: Number(planned.toFixed(2)),
+        totalHours: totalHours,
+        operationKey: String(operationKey),
+        plannedDay: toDateKey(day),
+        machine: machine,
+      });
+      state.schedule[key] = tasks;
+      remaining = Number((remaining - planned).toFixed(2));
+    }
+
+    if (remaining > 0) day = nextWorkday(day);
+  }
+}
+function compactMachineFromDay(machine, fromDay){
+  let day = parseDateKey(fromDay);
+  for (let i = 0; i < 60; i++) {
+    const key = `${toDateKey(day)}_${machine}`;
+    const uniqueOps = [...new Set((state.schedule[key] || []).map(t => makeOperationFingerprint(t)))];
+    uniqueOps.forEach(opKey => compactOperationForward(opKey));
+    day = nextWorkday(day);
+  }
+}
+
 function taskOverflowLabel(task){
   const fp = makeOperationFingerprint(task);
   const parts = Object.values(state.schedule).flat()
@@ -775,11 +838,14 @@ function handleImport(file){
     const importedTasks = [];
     rows.forEach(row=>{
       const vzk = row["Evidenční číslo zakázky"];
-      const operation = row["Název operace"] || row["Druh operace"];
+      const operationName = row["Název operace"] || "";
+      const operationType = row["Druh operace"] || "";
+      const operation = operationName || operationType;
+      const operationDetectionText = `${operationType} ${operationName}`.trim();
       const time = Number(row["Čas celkem"]);
       const part = row["Název sestavy"] || row["Položka"] || row["Název dílce"] || row["Dílec"] || row["Sestava"] || "";
       if(!vzk || !operation || !time) return;
-      const machineOptions = detectMachineOptionsFromOperation(operation);
+      const machineOptions = detectMachineOptionsFromOperation(operationDetectionText || operation);
       if(machineOptions.length === 0) return;
       const importedTask = {
         id: crypto.randomUUID ? crypto.randomUUID() : (Date.now()+"-"+Math.random()),
@@ -788,6 +854,7 @@ function handleImport(file){
         partName:String(part || ""),
         groupName:`VZK ${vzk}`,
         name:String(operation),
+        operationType:String(operationType),
         hours:Number(time),
         totalHours:Number(time),
         priority:"Střední",
@@ -865,11 +932,15 @@ function planTask(task, startDayKey, targetMachine){
     return {...item, operations:item.operations.filter(op=>op.id!==task.id)};
   }).filter(item=>item.type!=="group" || item.operations.length>0);
 
+  compactMachineFromDay(targetMachine, startDayKey);
+
   saveState(); render();
 }
 function returnScheduledTaskToBacklog(taskToReturn){
   const opKey = makeOperationFingerprint(taskToReturn);
   const totalHours = Number(taskToReturn.totalHours ?? taskToReturn.hours ?? 0);
+  const firstDay = String(taskToReturn.plannedDay || "");
+  const machine = String(taskToReturn.machine || "");
 
   const newSchedule = {};
   Object.entries(state.schedule).forEach(([key, tasks])=>{
@@ -904,6 +975,9 @@ function returnScheduledTaskToBacklog(taskToReturn){
     if(!alreadyExists) state.backlog[idx].operations.unshift(restoredOperation);
   }
   state.expandedGroups[groupId] = true;
+
+  if (machine && firstDay) compactMachineFromDay(machine, firstDay);
+
   saveState(); render();
 }
 function renderMachineFilter(){
@@ -955,7 +1029,7 @@ function renderBacklog(){
                 ${isPlanned ? `<span class="badge planned">Naplánováno</span>` : ``}
               </div>
               <div class="sub"><strong>Dílec:</strong> ${escapeHtml(op.partName || "Bez názvu dílce")}</div>
-              <div class="sub"><strong>Operace:</strong> ${escapeHtml(op.name || "")}</div>
+              <div class="sub"><strong>Operace:</strong> ${escapeHtml(op.name || "")}${op.operationType ? ` <span style="color:#5f6f86;">(${escapeHtml(op.operationType)})</span>` : ``}</div>
               <div class="sub">${Number(op.totalHours ?? op.hours ?? 0)} h • ${escapeHtml(machineTypeLabel(op.machineOptions))}</div>
             </div>
             ${isPlanned ? `` : `<button class="btn-sm del-op secondary">Smazat</button>`}
@@ -999,6 +1073,7 @@ function renderMachines(){
               <div>
                 <div class="title">${escapeHtml(t.name)} (${Number(t.hours).toFixed(2)} h)</div>
                 <div class="tiny">VZK ${escapeHtml(t.vzk || "")}${t.partName ? " | " + escapeHtml(t.partName) : ""}</div>
+                ${t.operationType ? `<div class="tiny">Typ operace: ${escapeHtml(t.operationType)}</div>` : ``}
                 ${t.due ? `<div class="tiny">Termín: ${escapeHtml(t.due)}</div>` : ``}
                 ${overflow ? `<div class="warn">${escapeHtml(overflow)}</div>` : ``}
               </div>
