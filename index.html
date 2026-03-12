@@ -444,33 +444,60 @@ async function cloudLoadState(){
   }
   return data.state;
 }
+function ensureCloudPostFrame(){
+  let iframe = document.getElementById("cloudSaveFrame");
+  if(!iframe){
+    iframe = document.createElement("iframe");
+    iframe.id = "cloudSaveFrame";
+    iframe.name = "cloudSaveFrame";
+    iframe.style.display = "none";
+    document.body.appendChild(iframe);
+  }
+  return iframe;
+}
+
 async function cloudSaveState(stateToSave){
   const payload = {
     state: stateToSave,
     meta: { source: "web", user: "" }
   };
 
-  const form = new URLSearchParams();
-  form.set("payload", JSON.stringify(payload));
+  ensureCloudPostFrame();
 
-  const res = await fetch(CLOUD_API_URL, {
-    method: "POST",
-    body: form,
-    redirect: "follow"
+  return new Promise((resolve, reject) => {
+    try{
+      const form = document.createElement("form");
+      form.method = "POST";
+      form.action = CLOUD_API_URL;
+      form.target = "cloudSaveFrame";
+      form.style.display = "none";
+
+      const input = document.createElement("input");
+      input.type = "hidden";
+      input.name = "payload";
+      input.value = JSON.stringify(payload);
+
+      form.appendChild(input);
+      document.body.appendChild(form);
+      form.submit();
+
+      setTimeout(async () => {
+        try{
+          form.remove();
+          const verify = await cloudLoadState();
+          if(verify){
+            resolve({ ok: true, verified: true });
+          } else {
+            resolve({ ok: true, verified: false });
+          }
+        }catch(err){
+          reject(err);
+        }
+      }, 1500);
+    }catch(err){
+      reject(err);
+    }
   });
-
-  const text = await res.text();
-  let data = null;
-  try{
-    data = JSON.parse(text);
-  }catch(_){
-    throw new Error("Cloud save returned non-JSON response");
-  }
-
-  if(!data.ok){
-    throw new Error(data.error || "Cloud save failed");
-  }
-  return data;
 }
 function scheduleCloudSave(){
   if(cloudHydrating || !cloudReady) return;
