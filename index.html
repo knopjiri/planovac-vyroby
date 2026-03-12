@@ -1,3 +1,27 @@
+const CLOUD_API_URL = "https://script.google.com/macros/s/AKfycbwJvPjbCrTGOHjPD6EWo5gwJyTRFqpcxDx35Ad-gloELMa_WwLBMkVzUZwSlonACWrL/exec";
+async function initCloud(){
+  const res = await fetch(CLOUD_API_URL + "?action=load");
+  const data = await res.json();
+
+  if(data.state){
+    state = data.state;
+  }
+
+  render();
+}
+
+initCloud();
+async function cloudSave(){
+  await fetch(CLOUD_API_URL,{
+    method:"POST",
+    headers:{
+      "Content-Type":"application/json"
+    },
+    body: JSON.stringify({
+      state: state
+    })
+  });
+}
 <!doctype html>
 <html lang="cs">
 <head>
@@ -108,21 +132,22 @@
     }
     .content-sticky{
       position:sticky;
-      top:112px;
-      z-index:900;
+      top:104px;
+      z-index:950;
     }
     .sidebar{
       position:sticky;
-      top:16px;
+      top:104px;
       display:flex;
       flex-direction:column;
       gap:16px;
-      height:calc(100vh - 32px);
+      height:calc(100vh - 120px);
       min-height:0;
       overflow-y:auto;
       overflow-x:hidden;
       padding-right:8px;
       scrollbar-width:thin;
+      align-self:start;
     }
     .sidebar::-webkit-scrollbar{width:10px}
     .sidebar::-webkit-scrollbar-thumb{background:#c7d2e5;border-radius:999px}
@@ -230,6 +255,10 @@
     .group-ops{display:flex;flex-direction:column;gap:8px;margin-top:10px}
     .op{background:#f9fbfe}
     .op.planned{background:var(--green);border-color:var(--green-b);opacity:.82}
+    .op.done{
+      background:#f9e3d1;
+      border-color:#e8b892;
+    }
     .main{display:flex;flex-direction:column;gap:16px}
     .toolbar{
       display:flex;
@@ -278,6 +307,35 @@
     .planned-op.dragging{
       opacity:.45;
       outline:2px dashed var(--brand-orange);
+    }
+    .planned-op.over-before{
+      box-shadow: inset 0 4px 0 var(--brand-orange);
+    }
+    .planned-op.over-after{
+      box-shadow: inset 0 -4px 0 var(--brand-orange);
+    }
+    .op-main-vzk{
+      font-size:16px;
+      font-weight:900;
+      color:var(--brand-blue);
+      line-height:1.15;
+    }
+    .op-main-part{
+      font-size:15px;
+      font-weight:800;
+      line-height:1.2;
+      margin-top:2px;
+    }
+    .op-main-operation{
+      font-size:14px;
+      font-weight:700;
+      margin-top:4px;
+    }
+    .op-main-hours{
+      font-size:14px;
+      font-weight:800;
+      color:var(--brand-orange-dark);
+      margin-top:2px;
     }
     .day-head{display:flex;justify-content:space-between;align-items:flex-start;gap:6px}
     .day-title{font-size:12px;font-weight:800;color:var(--brand-blue)}
@@ -377,6 +435,8 @@ let state = {
   expandedGroups: {},
   searchTerm: "",
   machineFilter: "vše",
+  sortBy: "default",
+  daySettings: {},
 };
 
 function pad(n){ return String(n).padStart(2,"0"); }
@@ -404,6 +464,56 @@ function getWeekLabel(dateStr){
 function machineCapacity(machineName){
   const m = MACHINES.find(x=>x.name===machineName); return (m?.shifts || 1) * AVAILABLE_HOURS;
 }
+function daySettingKey(dayKey, machineName){
+  return `${dayKey}_${machineName}`;
+}
+function getDaySetting(dayKey, machineName){
+  return state.daySettings[daySettingKey(dayKey, machineName)] || {};
+}
+function getDayCapacity(machineName, dayKey){
+  const setting = getDaySetting(dayKey, machineName);
+  if (setting.isOff) return 0;
+  if (setting.capacityOverride !== undefined && setting.capacityOverride !== null && setting.capacityOverride !== "") {
+    return Math.max(0, Number(setting.capacityOverride) || 0);
+  }
+  return machineCapacity(machineName);
+}
+function setDayCapacity(machineName, dayKey, value){
+  const key = daySettingKey(dayKey, machineName);
+  const current = state.daySettings[key] || {};
+  state.daySettings[key] = { ...current, capacityOverride: value };
+  rebuildMachineTimeline(machineName);
+  saveState();
+  render();
+}
+function setDayOff(machineName, dayKey, isOff){
+  const key = daySettingKey(dayKey, machineName);
+  const current = state.daySettings[key] || {};
+  state.daySettings[key] = { ...current, isOff: !!isOff };
+  rebuildMachineTimeline(machineName);
+  saveState();
+  render();
+}
+function detectMachineOptionsFromTechnology(technologyId){
+  const text = String(technologyId || "").toUpperCase().trim();
+
+  const cncLathes = ["NLX3000","NLX2500","NLX700","ST35"];
+  const mills = ["VF3","DMU75"];
+
+  if (text === "SOUSTRUZENI SCNC 35") return cncLathes;
+  if (text === "SOUSTRUZENI NLX 3000 MORI") return cncLathes;
+  if (text === "SOUSTRUZENI NLX 2500 MORI") return cncLathes;
+  if (text === "SOUSTRUZENI NLX 1250 MORI") return cncLathes;
+
+  if (text === "SOUSTRUZENI SK 50") return ["SN50", ...cncLathes];
+
+  if (text === "FREZOVANI CNC 4") return mills;
+  if (text === "FREZOVANI CNC 3") return mills;
+  if (text === "FREZOVANI DMU 75") return mills;
+
+  return [];
+}
+
 function detectMachineOptionsFromOperation(op){
   const text = String(op || "").toUpperCase().trim();
 
@@ -413,6 +523,15 @@ function detectMachineOptionsFromOperation(op){
 
   return [];
 }
+function deriveMachineOptions(taskLike){
+  const technologyId = String(taskLike?.technologyId || "").trim();
+  const operationType = String(taskLike?.operationType || "").trim();
+  const name = String(taskLike?.name || "").trim();
+  const fromTechnology = detectMachineOptionsFromTechnology(technologyId);
+  if (fromTechnology.length) return fromTechnology;
+  const fromOperation = detectMachineOptionsFromOperation(`${operationType} ${name}`.trim() || name);
+  return fromOperation;
+}
 function machineTypeLabel(machineOptions){
   if (!machineOptions || machineOptions.length===0) return "Bez stroje";
   if (machineOptions.length===1) return machineOptions[0];
@@ -420,8 +539,8 @@ function machineTypeLabel(machineOptions){
   const milling = ["VF3","DMU75"];
   const isTurning = machineOptions.every(m=>turning.includes(m));
   const isMilling = machineOptions.every(m=>milling.includes(m));
-  if (isTurning) return "Soustruh";
-  if (isMilling) return "Fréza";
+  if (isTurning) return machineOptions.includes("SN50") ? "Soustruh / SN50" : "CNC soustruh";
+  if (isMilling) return "Frézka";
   return machineOptions.join(", ");
 }
 function extractPartName(task){
@@ -477,7 +596,7 @@ function saveState(){
     machineFilter: state.machineFilter,
     searchTerm: state.searchTerm,
     sortBy: state.sortBy,
-    sortBy: state.sortBy,
+    daySettings: state.daySettings,
   }));
 }
 function loadState(){
@@ -492,19 +611,23 @@ function loadState(){
     if(typeof parsed.machineFilter === "string") state.machineFilter = parsed.machineFilter;
     if(typeof parsed.searchTerm === "string") state.searchTerm = parsed.searchTerm;
     if(typeof parsed.sortBy === "string") state.sortBy = parsed.sortBy;
-    if(typeof parsed.sortBy === "string") state.sortBy = parsed.sortBy;
+    if(parsed.daySettings && typeof parsed.daySettings === "object") state.daySettings = parsed.daySettings;
 
     state.backlog = state.backlog.map(item=>{
-      if(item.type !== "group") return item;
+      if(item.type !== "group") return {
+        ...item,
+        machineOptions: deriveMachineOptions(item)
+      };
       const normalizedOps = (item.operations || []).map(op=>({
         ...op,
         partName: extractPartName(op),
-        groupName: normalizeGroupName(op)
+        groupName: normalizeGroupName(op),
+        machineOptions: deriveMachineOptions(op)
       }));
       const seen = new Set();
       const uniqueOps = normalizedOps.filter(op=>{
         const fp = makeOperationFingerprint(op);
-        if(seen.has(fp)) return false
+        if(seen.has(fp)) return false;
         seen.add(fp);
         return true;
       });
@@ -523,7 +646,8 @@ function loadState(){
       const uniqueTasks = (tasks || []).map(task=>({
         ...task,
         partName: extractPartName(task),
-        groupName: normalizeGroupName(task)
+        groupName: normalizeGroupName(task),
+        machineOptions: deriveMachineOptions(task)
       })).filter(task=>{
         const fp = `${key}::${makeOperationFingerprint(task)}::${task.plannedDay || ""}::${task.machine || ""}::${task.hours || ""}`;
         if(seen.has(fp)) return false;
@@ -542,6 +666,7 @@ function resetAllData(){
   state.expandedGroups = {};
   state.searchTerm = "";
   state.machineFilter = "vše";
+  state.daySettings = {};
   localStorage.removeItem(STORAGE_KEY);
   render();
 }
@@ -603,47 +728,26 @@ function moveScheduledTask(taskFingerprint, fromDay, fromMachine, toDay, toMachi
 
   removeOperationFromSchedule(opKey);
 
-  let remaining = Number(prototype.totalHours || 0);
-  let day = parseDateKey(toDay);
-  let insertedFirstPart = false;
+  const key0 = `${toDay}_${toMachine}`;
+  const laneTasks = [...(state.schedule[key0] || [])];
+  const insertIndex = Math.max(0, Math.min(targetIndex ?? laneTasks.length, laneTasks.length));
+  const markerPart = {
+    ...prototype,
+    id: crypto.randomUUID ? crypto.randomUUID() : (Date.now()+"-"+Math.random()),
+    machine: toMachine,
+    plannedDay: toDay,
+    hours: 0,
+    totalHours: Number(prototype.totalHours),
+    operationKey: opKey,
+  };
+  laneTasks.splice(insertIndex, 0, markerPart);
+  state.schedule[key0] = laneTasks;
 
-  while(remaining > 0){
-    const key = `${toDateKey(day)}_${toMachine}`;
-    const tasks = [...(state.schedule[key] || [])];
-    const capacity = machineCapacity(toMachine);
-    const used = tasks.reduce((s,t)=>s + Number(t.hours || 0), 0);
-    const free = Math.max(capacity - used, 0);
-
-    if(free > 0){
-      const planned = Math.min(free, remaining);
-      const part = {
-        ...prototype,
-        id: crypto.randomUUID ? crypto.randomUUID() : (Date.now()+"-"+Math.random()),
-        machine: toMachine,
-        plannedDay: toDateKey(day),
-        hours: Number(planned.toFixed(2)),
-        totalHours: Number(prototype.totalHours),
-        operationKey: opKey,
-      };
-
-      if(!insertedFirstPart && targetIndex !== null && toDateKey(day) === toDay){
-        const idx = Math.max(0, Math.min(targetIndex, tasks.length));
-        tasks.splice(idx, 0, part);
-        insertedFirstPart = true;
-      } else {
-        tasks.push(part);
-      }
-
-      state.schedule[key] = tasks;
-      remaining = Number((remaining - planned).toFixed(2));
-    }
-
-    if(remaining > 0) day = nextWorkday(day);
-  }
-
-  compactMachineFromDay(toMachine, toDay);
+  const targetOrder = buildOrderedKeysForInsertion(toMachine, opKey, toDay, insertIndex);
+  removeOperationFromSchedule(opKey);
+  rebuildMachineTimeline(toMachine, targetOrder);
   if (fromMachine !== toMachine || fromDay !== toDay) {
-    compactMachineFromDay(fromMachine, fromDay);
+    rebuildMachineTimeline(fromMachine);
   }
 
   clearDragPreview();
@@ -651,17 +755,9 @@ function moveScheduledTask(taskFingerprint, fromDay, fromMachine, toDay, toMachi
   render();
 }
 function reorderScheduledTask(dayKey, machineName, taskFingerprint, targetIndex){
-  const key = getScheduleKey(dayKey, machineName);
-  const arr = [...(state.schedule[key] || [])];
   const opKey = String(taskFingerprint || "");
-  const block = arr.filter(t => makeOperationFingerprint(t) === opKey);
-  if (!block.length) return;
-
-  const remaining = arr.filter(t => makeOperationFingerprint(t) !== opKey);
-  if (targetIndex < 0) targetIndex = 0;
-  if (targetIndex > remaining.length) targetIndex = remaining.length;
-  remaining.splice(targetIndex, 0, ...block);
-  state.schedule[key] = remaining;
+  const targetOrder = buildOrderedKeysForInsertion(machineName, opKey, dayKey, targetIndex);
+  rebuildMachineTimeline(machineName, targetOrder);
   clearDragPreview();
   saveState();
   render();
@@ -685,6 +781,48 @@ function getOperationPartsByKey(operationKey){
     .sort((a,b) => String(a.plannedDay || "").localeCompare(String(b.plannedDay || "")));
 }
 function getOperationTotalHoursByKey(operationKey){
+function getMachineOrderedOperationKeys(machine){
+  const entries = Object.entries(state.schedule)
+    .filter(([key]) => key.endsWith(`_${machine}`))
+    .sort((a,b) => a[0].localeCompare(b[0]));
+  const ordered = [];
+  entries.forEach(([,tasks])=>{
+    (tasks || []).forEach(task=>{
+      const opKey = makeOperationFingerprint(task);
+      if(!ordered.includes(opKey)) ordered.push(opKey);
+    });
+  });
+  return ordered;
+}
+function buildOrderedKeysForInsertion(machine, opKey, targetDay, targetIndex){
+  const entries = Object.entries(state.schedule)
+    .filter(([key]) => key.endsWith(`_${machine}`))
+    .sort((a,b) => a[0].localeCompare(b[0]));
+  const ordered = [];
+  let beforeKeys = [];
+
+  entries.forEach(([key, tasks])=>{
+    const dayKey = key.split("_")[0];
+    const unique = [];
+    (tasks || []).forEach(task=>{
+      const k = makeOperationFingerprint(task);
+      if(k !== opKey && !unique.includes(k)) unique.push(k);
+    });
+    unique.forEach(k=>{ if(!ordered.includes(k)) ordered.push(k); });
+
+    if(dayKey < targetDay){
+      unique.forEach(k=>{ if(!beforeKeys.includes(k)) beforeKeys.push(k); });
+    } else if(dayKey === targetDay){
+      (tasks || []).slice(0, Math.max(0, targetIndex)).forEach(task=>{
+        const k = makeOperationFingerprint(task);
+        if(k !== opKey && !beforeKeys.includes(k)) beforeKeys.push(k);
+      });
+    }
+  });
+
+  const finalOrder = ordered.filter(k => !beforeKeys.includes(k));
+  return [...beforeKeys, opKey, ...finalOrder];
+}
   const parts = getOperationPartsByKey(operationKey);
   if(!parts.length) return 0;
   return Number(parts[0].totalHours ?? parts.reduce((s,t)=>s + Number(t.hours || 0), 0));
@@ -698,7 +836,7 @@ function buildPlacementPreview(operationKey, toDay, toMachine){
   while(remaining > 0){
     const key = `${toDateKey(day)}_${toMachine}`;
     const tasks = state.schedule[key] || [];
-    const capacity = machineCapacity(toMachine);
+    const capacity = getDayCapacity(toMachine, toDateKey(day));
     const used = tasks.reduce((s,t)=>s + Number(t.hours || 0), 0);
     const free = Math.max(capacity - used, 0);
     if(free > 0){
@@ -719,7 +857,7 @@ function buildBacklogPlacementPreview(task, toDay, toMachine){
   while(remaining > 0){
     const key = `${toDateKey(day)}_${toMachine}`;
     const tasks = state.schedule[key] || [];
-    const capacity = machineCapacity(toMachine);
+    const capacity = getDayCapacity(toMachine, toDateKey(day));
     const used = tasks.reduce((s,t)=>s + Number(t.hours || 0), 0);
     const free = Math.max(capacity - used, 0);
     if(free > 0){
@@ -762,7 +900,7 @@ function compactOperationForward(operationKey){
   while (remaining > 0) {
     const key = `${toDateKey(day)}_${machine}`;
     const tasks = [...(state.schedule[key] || [])];
-    const capacity = machineCapacity(machine);
+    const capacity = getDayCapacity(machine, toDateKey(day));
     const used = tasks.reduce((s,t)=>s + Number(t.hours || 0), 0);
     const free = Math.max(capacity - used, 0);
 
@@ -784,6 +922,70 @@ function compactOperationForward(operationKey){
     if (remaining > 0) day = nextWorkday(day);
   }
 }
+
+function markBacklogOperationDone(groupId, operationId){
+  state.backlog = state.backlog.map(item=>{
+    if(item.type !== "group" || item.id !== groupId) return item;
+    return {
+      ...item,
+      operations: (item.operations || []).map(op => op.id === operationId ? { ...op, isDone: true } : op)
+    };
+  });
+  saveState();
+  render();
+}
+function markScheduledOperationDone(task){
+  const opKey = makeOperationFingerprint(task);
+  const parts = getOperationPartsByKey(opKey);
+  const machine = String((parts[0]?.machine) || task.machine || "");
+
+  const next = {};
+  Object.entries(state.schedule).forEach(([key, tasks])=>{
+    const filtered = tasks.filter(t => makeOperationFingerprint(t) !== opKey);
+    if(filtered.length) next[key] = filtered;
+  });
+  state.schedule = next;
+
+  const totalHours = Number(task.totalHours ?? parts.reduce((s,t)=>s + Number(t.hours || 0), 0));
+  const groupId = `group-${task.vzk}`;
+  const doneOperation = {
+    id: crypto.randomUUID ? crypto.randomUUID() : (Date.now()+"-"+Math.random()),
+    type:"operation",
+    vzk:task.vzk,
+    partName:extractPartName(task),
+    groupName:normalizeGroupName(task),
+    name:task.name,
+    hours:totalHours,
+    totalHours:totalHours,
+    priority:task.priority || "Střední",
+    due:task.due || "",
+    machineOptions:task.machineOptions || [],
+    operationType:task.operationType || "",
+    technologyId:task.technologyId || "",
+    operationKey: opKey,
+    isDone: true,
+  };
+  const idx = state.backlog.findIndex(item=>item.type==="group" && String(item.vzk)===String(task.vzk));
+  if(idx === -1){
+    state.backlog.unshift({
+      id:groupId, type:"group", vzk:String(task.vzk), name:normalizeGroupName(task),
+      priority:"Střední", due:"", operations:[doneOperation]
+    });
+  } else {
+    const existingIdx = (state.backlog[idx].operations || []).findIndex(op => makeOperationFingerprint(op) === opKey);
+    if(existingIdx >= 0){
+      state.backlog[idx].operations[existingIdx] = { ...state.backlog[idx].operations[existingIdx], isDone:true };
+    } else {
+      state.backlog[idx].operations.unshift(doneOperation);
+    }
+  }
+
+  if(machine) rebuildMachineTimeline(machine);
+
+  saveState();
+  render();
+}
+
 function compactMachineFromDay(machine, fromDay){
   let day = parseDateKey(fromDay);
   for (let i = 0; i < 60; i++) {
@@ -791,6 +993,90 @@ function compactMachineFromDay(machine, fromDay){
     const uniqueOps = [...new Set((state.schedule[key] || []).map(t => makeOperationFingerprint(t)))];
     uniqueOps.forEach(opKey => compactOperationForward(opKey));
     day = nextWorkday(day);
+  }
+}
+function rebuildMachineTimeline(machine, preferredOrder=null){
+  const machineEntries = Object.entries(state.schedule)
+    .filter(([key]) => key.endsWith(`_${machine}`))
+    .sort((a,b) => a[0].localeCompare(b[0]));
+  const allTasks = machineEntries.flatMap(([,tasks]) => tasks || []);
+  if(!allTasks.length) return;
+
+  const naturalOrder = [];
+  machineEntries.forEach(([,tasks])=>{
+    (tasks || []).forEach(task=>{
+      const opKey = makeOperationFingerprint(task);
+      if(!naturalOrder.includes(opKey)) naturalOrder.push(opKey);
+    });
+  });
+  const orderedOpKeys = preferredOrder && preferredOrder.length
+    ? preferredOrder.filter(opKey => naturalOrder.includes(opKey))
+    : naturalOrder;
+
+  const metaMap = new Map();
+  naturalOrder.forEach(opKey=>{
+    const parts = allTasks.filter(t => makeOperationFingerprint(t) === opKey);
+    if(parts.length){
+      metaMap.set(opKey, {
+        ...parts[0],
+        totalHours: Number(parts[0].totalHours ?? parts.reduce((s,t)=>s + Number(t.hours || 0), 0)),
+        operationKey: opKey,
+      });
+    }
+  });
+
+  const scheduleFirstDay = machineEntries.length ? machineEntries[0][0].split("_")[0] : null;
+  const settingDays = Object.keys(state.daySettings || {})
+    .filter(k => k.endsWith(`_${machine}`))
+    .map(k => k.split("_")[0])
+    .sort();
+  const firstDay = [scheduleFirstDay, settingDays[0]].filter(Boolean).sort()[0] || null;
+
+  const nextSchedule = {};
+  Object.entries(state.schedule).forEach(([key, tasks])=>{
+    if(!key.endsWith(`_${machine}`)) nextSchedule[key] = tasks;
+  });
+  state.schedule = nextSchedule;
+
+  if(!firstDay) return;
+  let currentDay = parseDateKey(firstDay);
+
+  for(const opKey of orderedOpKeys){
+    const meta = metaMap.get(opKey);
+    if(!meta) continue;
+    let remaining = Number(meta.totalHours || 0);
+    let day = currentDay;
+    let firstPlacedDay = null;
+
+    while(remaining > 0){
+      const dayKey = toDateKey(day);
+      const key = `${dayKey}_${machine}`;
+      const laneTasks = [...(state.schedule[key] || [])];
+      const capacity = getDayCapacity(machine, dayKey);
+      const used = laneTasks.reduce((s,t)=>s + Number(t.hours || 0), 0);
+      const free = Math.max(capacity - used, 0);
+
+      if(free > 0){
+        const planned = Math.min(free, remaining);
+        laneTasks.push({
+          ...meta,
+          id: crypto.randomUUID ? crypto.randomUUID() : (Date.now()+"-"+Math.random()),
+          machine: machine,
+          plannedDay: dayKey,
+          hours: Number(planned.toFixed(2)),
+          totalHours: Number(meta.totalHours),
+          operationKey: opKey,
+        });
+        state.schedule[key] = laneTasks;
+        remaining = Number((remaining - planned).toFixed(2));
+        if(!firstPlacedDay) firstPlacedDay = dayKey;
+      }
+      if(remaining > 0) day = nextWorkday(day);
+    }
+
+    if(firstPlacedDay){
+      currentDay = parseDateKey(firstPlacedDay);
+    }
   }
 }
 
@@ -838,15 +1124,22 @@ function handleImport(file){
     const importedTasks = [];
     rows.forEach(row=>{
       const vzk = row["Evidenční číslo zakázky"];
+      const technologyId = row["Identifikátor technologie"] || "";
       const operationName = row["Název operace"] || "";
       const operationType = row["Druh operace"] || "";
-      const operation = operationName || operationType;
+      const operation = operationName || operationType || technologyId;
       const operationDetectionText = `${operationType} ${operationName}`.trim();
       const time = Number(row["Čas celkem"]);
       const part = row["Název sestavy"] || row["Položka"] || row["Název dílce"] || row["Dílec"] || row["Sestava"] || "";
       if(!vzk || !operation || !time) return;
-      const machineOptions = detectMachineOptionsFromOperation(operationDetectionText || operation);
+
+      let machineOptions = deriveMachineOptions({
+        technologyId: technologyId,
+        operationType: operationType,
+        name: operation
+      });
       if(machineOptions.length === 0) return;
+
       const importedTask = {
         id: crypto.randomUUID ? crypto.randomUUID() : (Date.now()+"-"+Math.random()),
         type:"operation",
@@ -855,6 +1148,7 @@ function handleImport(file){
         groupName:`VZK ${vzk}`,
         name:String(operation),
         operationType:String(operationType),
+        technologyId:String(technologyId),
         hours:Number(time),
         totalHours:Number(time),
         priority:"Střední",
@@ -906,7 +1200,7 @@ function planTask(task, startDayKey, targetMachine){
   while(remaining > 0){
     const key = `${toDateKey(day)}_${targetMachine}`;
     const tasks = [...(state.schedule[key] || [])];
-    const capacity = machineCapacity(targetMachine);
+    const capacity = getDayCapacity(targetMachine, toDateKey(day));
     const used = tasks.reduce((s,t)=>s + Number(t.hours || 0), 0);
     const free = Math.max(capacity - used, 0);
 
@@ -932,7 +1226,7 @@ function planTask(task, startDayKey, targetMachine){
     return {...item, operations:item.operations.filter(op=>op.id!==task.id)};
   }).filter(item=>item.type!=="group" || item.operations.length>0);
 
-  compactMachineFromDay(targetMachine, startDayKey);
+  rebuildMachineTimeline(targetMachine);
 
   saveState(); render();
 }
@@ -1018,34 +1312,52 @@ function renderBacklog(){
       const opsWrap = group.querySelector(".group-ops");
       task.operations.forEach(op=>{
         const isPlanned = plannedSet.has(makeOperationFingerprint(op));
+        const isDone = !!op.isDone;
         const div = document.createElement("div");
-        div.className = `op ${isPlanned ? "planned" : ""}`;
-        div.draggable = !isPlanned;
+        div.className = `op ${isPlanned ? "planned" : ""} ${isDone ? "done" : ""}`;
+        div.draggable = !isPlanned && !isDone;
         div.innerHTML = `
           <div class="op-head">
             <div>
-              <div class="row wrap">
-                <div class="title">${escapeHtml(op.name)}</div>
-                ${isPlanned ? `<span class="badge planned">Naplánováno</span>` : ``}
-              </div>
-              <div class="sub"><strong>Dílec:</strong> ${escapeHtml(op.partName || "Bez názvu dílce")}</div>
-              <div class="sub"><strong>Operace:</strong> ${escapeHtml(op.name || "")}${op.operationType ? ` <span style="color:#5f6f86;">(${escapeHtml(op.operationType)})</span>` : ``}</div>
-              <div class="sub">${Number(op.totalHours ?? op.hours ?? 0)} h • ${escapeHtml(machineTypeLabel(op.machineOptions))}</div>
+              <div class="op-main-vzk">VZK ${escapeHtml(op.vzk || "")}</div>
+              <div class="op-main-part">${escapeHtml(op.partName || "Bez názvu dílce")}</div>
+              <div class="op-main-operation">${escapeHtml(op.name || "")}</div>
+              <div class="op-main-hours">${Number(op.totalHours ?? op.hours ?? 0)} h</div>
+              ${op.operationType ? `<div class="sub"><strong>Typ:</strong> ${escapeHtml(op.operationType)}</div>` : ``}
+              ${op.technologyId ? `<div class="sub"><strong>Technologie:</strong> ${escapeHtml(op.technologyId)}</div>` : ``}
+              <div class="sub"><strong>Možné stroje:</strong> ${escapeHtml((op.machineOptions || []).join(", "))}</div>
+              ${isPlanned ? `<span class="badge planned">Naplánováno</span>` : ``}
+              ${isDone ? `<span class="badge" style="background:#f9e3d1;border-color:#e8b892;">HOTOVO</span>` : ``}
             </div>
-            ${isPlanned ? `` : `<button class="btn-sm del-op secondary">Smazat</button>`}
+            <div class="actions" style="display:flex;flex-direction:column;gap:6px;">
+              ${!isDone ? `<button class="btn-sm done-backlog-btn secondary" data-group-id="${escapeAttr(task.id)}" data-op-id="${escapeAttr(op.id)}">HOTOVO</button>` : ``}
+              ${(!isPlanned && !isDone) ? `<button class="btn-sm del-op secondary">Smazat</button>` : ``}
+            </div>
           </div>
         `;
-        if(!isPlanned){
+        if(!isPlanned && !isDone){
           div.addEventListener("dragstart", e=>{
             e.dataTransfer.setData("application/json", JSON.stringify({...op, groupId:task.id}));
           });
-          div.querySelector(".del-op").onclick = ()=>deleteOperationFromGroup(task.id, op.id);
+          const delBtn = div.querySelector(".del-op");
+          if(delBtn) delBtn.onclick = ()=>deleteOperationFromGroup(task.id, op.id);
         }
+        const doneBtn = div.querySelector(".done-backlog-btn");
+        if(doneBtn) doneBtn.onclick = ()=>markBacklogOperationDone(task.id, op.id);
         opsWrap.appendChild(div);
       });
       wrap.appendChild(group);
     }
   });
+}
+function getDropTargetIndex(targetEl, e){
+  const rect = targetEl.getBoundingClientRect();
+  const halfway = rect.top + rect.height / 2;
+  const isBefore = e.clientY < halfway;
+  const index = Number(targetEl.dataset.index || 0);
+  targetEl.classList.toggle("over-before", isBefore);
+  targetEl.classList.toggle("over-after", !isBefore);
+  return isBefore ? index : index + 1;
 }
 function renderMachines(){
   const wrap = document.getElementById("machinesWrap");
@@ -1056,12 +1368,11 @@ function renderMachines(){
       const key = `${dayKey}_${machine.name}`;
       const tasks = state.schedule[key] || [];
       const used = tasks.reduce((s,t)=>s+Number(t.hours||0),0);
-      const capacity = machineCapacity(machine.name);
+      const capacity = getDayCapacity(machine.name, dayKey);
       const util = Math.min(100, capacity ? used / capacity * 100 : 0);
       const items = tasks.map((t, index)=>{
         const dueStatus = getDueStatus(t.due, dayKey);
         const cls = dueStatus === "before" ? "green" : dueStatus === "after" ? "red" : "";
-        const overflow = taskOverflowLabel(t);
         return `
           <div class="planned-op ${cls}" draggable="true"
                data-fp="${escapeAttr(makeOperationFingerprint(t))}"
@@ -1071,13 +1382,13 @@ function renderMachines(){
                data-index="${index}">
             <div class="planned-head">
               <div>
-                <div class="title">${escapeHtml(t.name)} (${Number(t.hours).toFixed(2)} h)</div>
-                <div class="tiny">VZK ${escapeHtml(t.vzk || "")}${t.partName ? " | " + escapeHtml(t.partName) : ""}</div>
-                ${t.operationType ? `<div class="tiny">Typ operace: ${escapeHtml(t.operationType)}</div>` : ``}
-                ${t.due ? `<div class="tiny">Termín: ${escapeHtml(t.due)}</div>` : ``}
-                ${overflow ? `<div class="warn">${escapeHtml(overflow)}</div>` : ``}
+                <div class="op-main-vzk">VZK ${escapeHtml(t.vzk || "")}</div>
+                <div class="op-main-part">${escapeHtml(t.partName || "Bez názvu dílce")}</div>
+                <div class="op-main-operation">${escapeHtml(t.name || "")}</div>
+                <div class="op-main-hours">${Number(t.hours).toFixed(2)} h</div>
               </div>
-              <div class="actions">
+              <div class="actions" style="display:flex;flex-direction:column;gap:6px;">
+                <button class="btn-sm done-btn secondary" data-fp="${escapeAttr(makeOperationFingerprint(t))}">HOTOVO</button>
                 <button class="btn-sm return-btn secondary" data-fp="${escapeAttr(makeOperationFingerprint(t))}">↩</button>
               </div>
             </div>
@@ -1092,7 +1403,12 @@ function renderMachines(){
             <span class="badge">${used.toFixed(1)} / ${capacity} h</span>
           </div>
           <div class="progress"><div class="bar" style="width:${util}%"></div></div>
-          <div class="tiny">Kapacita dle směn: ${capacity} h</div>
+          <div class="tiny">Kapacita dne: ${capacity} h ${capacity===0 ? "• Volno" : ""}</div>
+          <div class="tiny">Změna kapacity přepočítá plán stroje od tohoto dne dopředu.</div>
+          <div class="tiny" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px;">
+            <label style="display:flex;align-items:center;gap:4px;">Kapacita <input type="number" step="0.5" min="0" value="${(getDaySetting(dayKey, machine.name).capacityOverride ?? "")}" data-capacity-day="${dayKey}" data-capacity-machine="${machine.name}" style="width:72px;padding:4px 6px;border-radius:8px;"></label>
+            <label style="display:flex;align-items:center;gap:4px;"><input type="checkbox" ${getDaySetting(dayKey, machine.name).isOff ? "checked" : ""} data-off-day="${dayKey}" data-off-machine="${machine.name}"> Volno</label>
+          </div>
           <div class="day-items">${items || `<div class="empty">Přetáhni sem operaci.</div>`}${state.dragPreview && state.dragPreview.targetDay===dayKey && state.dragPreview.targetMachine===machine.name ? `<div class="preview-ghost">${state.dragPreview.lines.map(line => `${escapeHtml(formatDate(parseDateKey(line.day)))} • ${escapeHtml(line.machine)} • ${Number(line.hours).toFixed(2)} h`).join("<br>")}</div>` : ``}</div>
         </div>
       `;
@@ -1186,6 +1502,8 @@ function renderMachines(){
 
     el.addEventListener("dragend", ()=>{
       el.classList.remove("dragging");
+      el.classList.remove("over-before");
+      el.classList.remove("over-after");
       clearDragPreview();
       renderMachines();
     });
@@ -1196,30 +1514,38 @@ function renderMachines(){
       const scheduledTask = readDraggedScheduledTask(e);
       if(!scheduledTask) return;
       const targetMachine = el.dataset.machine;
-      if(scheduledTask.machineOptions?.length && !scheduledTask.machineOptions.includes(targetMachine)) return;
-      el.classList.add("drop-ok");
+      const targetOptions = scheduledTask.machineOptions?.length ? scheduledTask.machineOptions : [];
+      if(targetOptions.length && !targetOptions.includes(targetMachine)) return;
+      const targetIndex = getDropTargetIndex(el, e);
       setDragPreview({
         targetDay: el.dataset.day,
         targetMachine: targetMachine,
-        lines: buildPlacementPreview(scheduledTask.operationKey || scheduledTask.fp, el.dataset.day, targetMachine)
+        lines: buildPlacementPreview(scheduledTask.operationKey || scheduledTask.fp, el.dataset.day, targetMachine),
+        targetIndex: targetIndex
       });
       renderMachines();
     });
 
-    el.addEventListener("dragleave", ()=>el.classList.remove("drop-ok"));
+    el.addEventListener("dragleave", ()=>{
+      el.classList.remove("over-before");
+      el.classList.remove("over-after");
+    });
 
     el.addEventListener("drop", e=>{
       e.preventDefault();
       e.stopPropagation();
-      el.classList.remove("drop-ok");
       const scheduledTask = readDraggedScheduledTask(e);
       if(!scheduledTask) return;
 
       const targetDay = el.dataset.day;
       const targetMachine = el.dataset.machine;
-      const targetIndex = Number(el.dataset.index || 0);
+      const targetIndex = getDropTargetIndex(el, e);
 
-      if(scheduledTask.machineOptions?.length && !scheduledTask.machineOptions.includes(targetMachine)) return;
+      el.classList.remove("over-before");
+      el.classList.remove("over-after");
+
+      const targetOptions = scheduledTask.machineOptions?.length ? scheduledTask.machineOptions : [];
+      if(targetOptions.length && !targetOptions.includes(targetMachine)) return;
 
       const sameLane = scheduledTask.fromDay === targetDay && scheduledTask.fromMachine === targetMachine;
       if(sameLane){
@@ -1237,12 +1563,34 @@ function renderMachines(){
     });
   });
 
+  wrap.querySelectorAll(".done-btn").forEach(btn=>{
+    btn.onclick = ()=>{
+      const fp = btn.dataset.fp;
+      const task = Object.values(state.schedule).flat().find(t=>makeOperationFingerprint(t)===fp);
+      if(task) markScheduledOperationDone(task);
+    };
+  });
+
   wrap.querySelectorAll(".return-btn").forEach(btn=>{
     btn.onclick = ()=>{
       const fp = btn.dataset.fp;
       const task = Object.values(state.schedule).flat().find(t=>makeOperationFingerprint(t)===fp);
       if(task) returnScheduledTaskToBacklog(task);
     };
+  });
+
+  wrap.querySelectorAll("[data-capacity-day]").forEach(input=>{
+    input.addEventListener("change", e=>{
+      setDayCapacity(e.target.dataset.capacityMachine, e.target.dataset.capacityDay, e.target.value);
+    });
+    input.addEventListener("click", e=>e.stopPropagation());
+  });
+
+  wrap.querySelectorAll("[data-off-day]").forEach(input=>{
+    input.addEventListener("change", e=>{
+      setDayOff(e.target.dataset.offMachine, e.target.dataset.offDay, e.target.checked);
+    });
+    input.addEventListener("click", e=>e.stopPropagation());
   });
 }
 function readDraggedTask(e){
@@ -1304,6 +1652,9 @@ document.getElementById("todayWeek").onclick = ()=>{ state.weekStart = startOfWe
 document.getElementById("resetData").onclick = ()=>{ if(confirm("Opravdu smazat uložená data?")) resetAllData(); };
 
 loadState();
+[...new Set(Object.keys(state.schedule).map(k => k.split("_").slice(1).join("_")).filter(Boolean))].forEach(machineName=>{
+  rebuildMachineTimeline(machineName);
+});
 render();
 </script>
 </body>
