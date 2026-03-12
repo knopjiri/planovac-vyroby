@@ -449,10 +449,13 @@ async function cloudSaveState(stateToSave){
     state: stateToSave,
     meta: { source: "web", user: "" }
   };
+
+  const form = new URLSearchParams();
+  form.set("payload", JSON.stringify(payload));
+
   const res = await fetch(CLOUD_API_URL, {
     method: "POST",
-    headers: { "Content-Type": "text/plain;charset=utf-8" },
-    body: JSON.stringify(payload),
+    body: form,
     redirect: "follow"
   });
 
@@ -492,7 +495,7 @@ function scheduleCloudSave(){
       updateCloudStatus("Cloud: uloženo");
     }catch(err){
       console.error(err);
-      updateCloudStatus("Cloud: chyba ukládání"); console.error("Cloud save failed");
+      updateCloudStatus("Cloud: chyba ukládání"); console.error("Cloud save failed", err);
     }finally{
       cloudSaveInFlight = false;
     }
