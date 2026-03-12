@@ -1,33 +1,9 @@
-const CLOUD_API_URL = "https://script.google.com/macros/s/AKfycbwJvPjbCrTGOHjPD6EWo5gwJyTRFqpcxDx35Ad-gloELMa_WwLBMkVzUZwSlonACWrL/exec";
-async function initCloud(){
-  const res = await fetch(CLOUD_API_URL + "?action=load");
-  const data = await res.json();
-
-  if(data.state){
-    state = data.state;
-  }
-
-  render();
-}
-
-initCloud();
-async function cloudSave(){
-  await fetch(CLOUD_API_URL,{
-    method:"POST",
-    headers:{
-      "Content-Type":"application/json"
-    },
-    body: JSON.stringify({
-      state: state
-    })
-  });
-}
 <!doctype html>
 <html lang="cs">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>TIMSEAL – Plánovač výroby v5</title>
+  <title>TIMSEAL – Plánovač výroby cloud</title>
   <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
   <style>
     :root{
@@ -114,6 +90,23 @@ async function cloudSave(){
       letter-spacing:.08em;
       text-transform:uppercase;
     }
+
+    .cloud-status{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding:6px 10px;
+      border-radius:999px;
+      background:rgba(255,255,255,.14);
+      color:#fff;
+      font-size:12px;
+      font-weight:700;
+      max-width:340px;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+
     .topbar-note{
       font-size:13px;
       color:rgba(255,255,255,.82);
@@ -378,7 +371,7 @@ async function cloudSave(){
       <input id="fileInputHeader" type="file" accept=".xlsx,.xls" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0;" />
     </div>
     </div>
-    <div class="topbar-note">Interní plánovač výroby</div>
+    <div class="cloud-status" id="cloudStatus">Cloud: připojování…</div><div class="topbar-note">Interní plánovač výroby</div>
   </div>
 </div>
 <div class="app">
@@ -427,6 +420,104 @@ const MACHINES = [
   { name: "VF3", shifts: 1 },
   { name: "DMU75", shifts: 1 },
 ];
+
+
+const CLOUD_API_URL = "https://script.google.com/macros/s/AKfycbwJvPjbCrTGOHjPD6EWo5gwJyTRFqpcxDx35Ad-gloELMa_WwLBMkVzUZwSlonACWrL/exec";
+let cloudHydrating = true;
+let cloudReady = false;
+let cloudSaveTimer = null;
+let cloudLastLoadedHash = "";
+let cloudSaveInFlight = false;
+
+function updateCloudStatus(text){
+  const el = document.getElementById("cloudStatus");
+  if(el) el.textContent = text;
+}
+function safeHash(obj){
+  try { return JSON.stringify(obj); } catch (_) { return ""; }
+}
+async function cloudLoadState(){
+  const res = await fetch(`${CLOUD_API_URL}?action=load`, { method: "GET" });
+  const data = await res.json();
+  if(!data.ok){
+    throw new Error(data.error || "Cloud load failed");
+  }
+  return data.state;
+}
+async function cloudSaveState(stateToSave){
+  const payload = {
+    state: stateToSave,
+    meta: { source: "web", user: "" }
+  };
+  const res = await fetch(CLOUD_API_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if(!data.ok){
+    throw new Error(data.error || "Cloud save failed");
+  }
+  return data;
+}
+function scheduleCloudSave(){
+  if(cloudHydrating || !cloudReady) return;
+  clearTimeout(cloudSaveTimer);
+  cloudSaveTimer = setTimeout(async () => {
+    if(cloudSaveInFlight) return;
+    cloudSaveInFlight = true;
+    updateCloudStatus("Cloud: ukládám…");
+    try{
+      const snapshot = {
+        weekStart: toDateKey(state.weekStart),
+        backlog: state.backlog,
+        schedule: state.schedule,
+        expandedGroups: state.expandedGroups,
+        machineFilter: state.machineFilter,
+        searchTerm: state.searchTerm,
+        sortBy: state.sortBy,
+        daySettings: state.daySettings,
+      };
+      await cloudSaveState(snapshot);
+      cloudLastLoadedHash = safeHash(snapshot);
+      updateCloudStatus("Cloud: uloženo");
+    }catch(err){
+      console.error(err);
+      updateCloudStatus("Cloud: chyba ukládání");
+    }finally{
+      cloudSaveInFlight = false;
+    }
+  }, 900);
+}
+async function initCloud(){
+  updateCloudStatus("Cloud: načítám…");
+  try{
+    const remoteState = await cloudLoadState();
+    if(remoteState){
+      if(remoteState.weekStart) state.weekStart = startOfWeek(parseDateKey(remoteState.weekStart));
+      if(Array.isArray(remoteState.backlog)) state.backlog = remoteState.backlog;
+      if(remoteState.schedule && typeof remoteState.schedule === "object") state.schedule = remoteState.schedule;
+      if(remoteState.expandedGroups && typeof remoteState.expandedGroups === "object") state.expandedGroups = remoteState.expandedGroups;
+      if(typeof remoteState.machineFilter === "string") state.machineFilter = remoteState.machineFilter;
+      if(typeof remoteState.searchTerm === "string") state.searchTerm = remoteState.searchTerm;
+      if(typeof remoteState.sortBy === "string") state.sortBy = remoteState.sortBy;
+      if(remoteState.daySettings && typeof remoteState.daySettings === "object") state.daySettings = remoteState.daySettings;
+      cloudLastLoadedHash = safeHash(remoteState);
+      updateCloudStatus("Cloud: načteno");
+    }else{
+      updateCloudStatus("Cloud: prázdný stav");
+    }
+    cloudReady = true;
+    cloudHydrating = false;
+    render();
+  }catch(err){
+    console.error(err);
+    cloudReady = true;
+    cloudHydrating = false;
+    updateCloudStatus("Cloud: offline, lokální data");
+    render();
+  }
+}
 
 let state = {
   weekStart: startOfWeek(new Date()),
@@ -588,7 +679,7 @@ function getDueStatus(due, plannedDate){
   return current <= dueDate ? "before" : "after";
 }
 function saveState(){
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({
+  const snapshot = {
     weekStart: toDateKey(state.weekStart),
     backlog: state.backlog,
     schedule: state.schedule,
@@ -597,7 +688,14 @@ function saveState(){
     searchTerm: state.searchTerm,
     sortBy: state.sortBy,
     daySettings: state.daySettings,
-  }));
+  };
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+  if(!cloudHydrating){
+    const currentHash = safeHash(snapshot);
+    if(currentHash !== cloudLastLoadedHash){
+      scheduleCloudSave();
+    }
+  }
 }
 function loadState(){
   try{
@@ -1656,6 +1754,7 @@ loadState();
   rebuildMachineTimeline(machineName);
 });
 render();
+initCloud();
 </script>
 </body>
 </html>
