@@ -457,8 +457,10 @@ function ensureCloudPostFrame(){
 }
 
 async function cloudSaveState(stateToSave){
+  const revision = `${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+  const payloadState = { ...stateToSave, __cloudRevision: revision };
   const payload = {
-    state: stateToSave,
+    state: payloadState,
     meta: { source: "web", user: "" }
   };
 
@@ -481,19 +483,37 @@ async function cloudSaveState(stateToSave){
       document.body.appendChild(form);
       form.submit();
 
-      setTimeout(async () => {
+      const started = Date.now();
+      const maxWaitMs = 10000;
+      const intervalMs = 1200;
+
+      const verifyLoop = async () => {
         try{
-          form.remove();
           const verify = await cloudLoadState();
-          if(verify){
-            resolve({ ok: true, verified: true });
-          } else {
-            resolve({ ok: true, verified: false });
+          if(verify && verify.__cloudRevision === revision){
+            form.remove();
+            resolve({ ok: true, verified: true, revision });
+            return;
           }
+
+          if(Date.now() - started >= maxWaitMs){
+            form.remove();
+            reject(new Error("Cloud save was not verified in time"));
+            return;
+          }
+
+          setTimeout(verifyLoop, intervalMs);
         }catch(err){
-          reject(err);
+          if(Date.now() - started >= maxWaitMs){
+            form.remove();
+            reject(err);
+            return;
+          }
+          setTimeout(verifyLoop, intervalMs);
         }
-      }, 1500);
+      };
+
+      setTimeout(verifyLoop, intervalMs);
     }catch(err){
       reject(err);
     }
@@ -517,9 +537,9 @@ function scheduleCloudSave(){
         sortBy: state.sortBy,
         daySettings: state.daySettings,
       };
-      await cloudSaveState(snapshot);
+      const result = await cloudSaveState(snapshot);
       cloudLastLoadedHash = safeHash(snapshot);
-      updateCloudStatus("Cloud: uloženo");
+      updateCloudStatus(result && result.verified ? "Cloud: uloženo" : "Cloud: neověřeno");
     }catch(err){
       console.error(err);
       updateCloudStatus("Cloud: chyba ukládání"); console.error("Cloud save failed", err);
@@ -541,10 +561,13 @@ async function initCloud(){
       if(typeof remoteState.searchTerm === "string") state.searchTerm = remoteState.searchTerm;
       if(typeof remoteState.sortBy === "string") state.sortBy = remoteState.sortBy;
       if(remoteState.daySettings && typeof remoteState.daySettings === "object") state.daySettings = remoteState.daySettings;
-      cloudLastLoadedHash = safeHash(remoteState);
+      delete state.__cloudRevision;
+      const remoteComparable = { ...remoteState };
+      delete remoteComparable.__cloudRevision;
+      cloudLastLoadedHash = safeHash(remoteComparable);
       updateCloudStatus("Cloud: načteno");
     }else{
-      updateCloudStatus("Cloud: prázdný stav");
+      updateCloudStatus("Cloud: prázdný stav v databázi");
     }
     cloudReady = true;
     cloudHydrating = false;
